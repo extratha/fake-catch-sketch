@@ -88,13 +88,16 @@ const Canvas: React.FC<CanvasProps> = ({ onSave, disabled, color = "#f8fafc", li
     onSave(canvas.toDataURL());
   };
 
+  const pencilCursor = `url("data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjQiIGhlaWdodD0iMjQiIHZpZXdCb3g9IjAgMCAyNCAyNCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KICA8cGF0aCBkPSJNMTggMkwyMiA2TDcgMjFMMiAyMkwzIDE3TDE4IDJaIiBmaWxsPSIjRkFDQzE1IiBzdHJva2U9IiMxRTI5M0IiIHN0cm9rZS13aWR0aD0iMS41IiBzdHJva2UtbGluZWpvaW49InJvdW5kIi8+CiAgPHBhdGggZD0iTTE4IDJMMjIgNkwyMCA4TDE2IDRMMTggMloiIGZpbGw9IiNGREE0QUYiIHN0cm9rZT0iIzFFMjkzQiIgc3Ryb2tlLXdpZHRoPSIxLjUiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz4KICA8cGF0aCBkPSJNMiAyMkw1IDIxTDMgMTlMMiAyMloiIGZpbGw9IiM0NzU1NjkiLz4KPC9zdmc+") 2 22, crosshair`;
+
   return (
     <div className="relative w-full aspect-[4/3] bg-slate-800 rounded-lg overflow-hidden border-2 border-slate-700">
       <canvas
         ref={canvasRef}
         width={800}
         height={600}
-        className={`w-full h-full cursor-crosshair ${disabled ? 'opacity-80' : ''}`}
+        style={{ cursor: disabled ? 'default' : pencilCursor }}
+        className={`w-full h-full ${disabled ? 'opacity-80' : ''}`}
         onMouseDown={startDrawing}
         onMouseMove={draw}
         onMouseUp={stopDrawing}

@@ -36,15 +36,12 @@ const broadcastRoomState = (roomId: string) => {
     if (state) {
         io.to(roomId).emit('game-state-update', state);
     }
-    console.log('board cast room state', state)
 };
 
 io.on('connection', (socket) => {
-    console.log('User connected:', socket.id);
 
     socket.on('join-room', ({ roomId, playerName, playerId }: { roomId: string, playerName: string, playerId: string }) => {
         socket.join(roomId);
-        console.log(`Player ${playerName} (${socket.id}) joined room: ${roomId}`);
 
         if (!rooms.has(roomId)) {
             rooms.set(roomId, {
@@ -126,7 +123,6 @@ io.on('connection', (socket) => {
     });
 
     socket.on('disconnect', () => {
-        console.log('User disconnected:', socket.id);
     });
 });
 

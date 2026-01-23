@@ -44,6 +44,7 @@ const App: React.FC = () => {
 
   const [currentDrawing, setCurrentDrawing] = useState<string | null>(null);
   const [randomWords, setRandomWords] = useState<string[]>([]);
+  const [activeRooms, setActiveRooms] = useState<{ id: string, playerCount: number, phase: string }[]>([]);
 
   // Socket setup
   const socket = useMemo(() => {
@@ -92,6 +93,7 @@ const App: React.FC = () => {
     };
 
     socket.on('game-state-update', onGameStateUpdate);
+    socket.on('room-list-update', (rooms: any) => setActiveRooms(rooms));
 
     // Initial join check if we have a name and room
     if (userName && roomPath && gameState.roomId !== roomPath) {
@@ -301,6 +303,24 @@ const App: React.FC = () => {
             <p className="text-slate-400 font-medium">Draw faster, guess better!</p>
           </div>
 
+          <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-700/50 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-blue-500/20 rounded-full flex items-center justify-center text-blue-400 font-bold">
+                {userName.charAt(0).toUpperCase()}
+              </div>
+              <div>
+                <span className="text-xs font-bold text-slate-500 uppercase block tracking-wider">Your Artist ID</span>
+                <span className="text-white font-black">{userName}</span>
+              </div>
+            </div>
+            <button
+              onClick={() => setShowNameModal(true)}
+              className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-300 text-xs font-bold rounded-lg transition-colors border border-slate-600"
+            >
+              EDIT
+            </button>
+          </div>
+
           <div className="space-y-4">
             <button
               onClick={createRoom}
@@ -310,14 +330,38 @@ const App: React.FC = () => {
             </button>
             <div className="relative">
               <div className="absolute inset-0 flex items-center"><span className="w-full border-t border-slate-700"></span></div>
-              <div className="relative flex justify-center text-xs uppercase"><span className="bg-slate-800 px-2 text-slate-500 font-bold">OR JOIN BY URL</span></div>
+              <div className="relative flex justify-center text-xs uppercase"><span className="bg-slate-800 px-2 text-slate-500 font-bold">ACTIVE ROOMS</span></div>
             </div>
-            <p className="text-center text-sm text-slate-500">Share a link with friends to play together.</p>
+
+            <div className="space-y-2 max-h-[240px] overflow-y-auto pr-1">
+              {activeRooms.length === 0 ? (
+                <div className="text-center py-6 text-slate-500 italic text-sm">
+                  No online rooms yet. Create one!
+                </div>
+              ) : (
+                activeRooms.map(room => (
+                  <div key={room.id} className="flex items-center justify-between p-3 bg-slate-900/30 rounded-xl border border-slate-700/50 hover:bg-slate-900/50 transition-colors">
+                    <div>
+                      <span className="text-white font-bold block">{room.id}</span>
+                      <span className="text-[10px] text-slate-500 font-black uppercase flex items-center gap-1">
+                        <Users size={10} /> {room.playerCount} Players • {room.phase}
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => joinRoom(room.id, userName)}
+                      className="px-4 py-2 bg-slate-700 hover:bg-blue-600 text-white text-xs font-bold rounded-lg transition-all border-b-2 border-slate-900 hover:border-blue-800"
+                    >
+                      JOIN
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
           </div>
 
-          <div className="pt-4 border-t border-slate-700/50 flex items-center justify-center gap-2 text-slate-400 text-sm">
-            <Info size={16} />
-            <span>Multiplayer requires sharing the URL.</span>
+          <div className="pt-4 border-t border-slate-700/50 flex items-center justify-center gap-4 text-slate-400 text-[10px] font-black uppercase tracking-widest">
+            <span>Room Persistence Active</span>
+            <div className="w-1 h-1 bg-green-500 rounded-full animate-pulse" />
           </div>
         </div>
 

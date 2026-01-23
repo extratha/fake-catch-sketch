@@ -36,9 +36,26 @@ const broadcastRoomState = (roomId: string) => {
     if (state) {
         io.to(roomId).emit('game-state-update', state);
     }
+    broadcastRoomList();
+};
+
+const broadcastRoomList = () => {
+    const roomList = Array.from(rooms.values()).map(r => ({
+        id: r.roomId,
+        playerCount: r.players.length,
+        phase: r.phase
+    }));
+    io.emit('room-list-update', roomList);
 };
 
 io.on('connection', (socket) => {
+    // Send initial room list to new connection
+    const initialRooms = Array.from(rooms.values()).map(r => ({
+        id: r.roomId,
+        playerCount: r.players.length,
+        phase: r.phase
+    }));
+    socket.emit('room-list-update', initialRooms);
 
     socket.on('join-room', ({ roomId, playerName, playerId }: { roomId: string, playerName: string, playerId: string }) => {
         socket.join(roomId);

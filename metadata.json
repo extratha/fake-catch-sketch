@@ -1,0 +1,5 @@
+{
+  "name": "Cat Sketch Multiplayer",
+  "description": "A real-time multiplayer drawing and guessing game where players compete to draw nouns and guess them for stars. Features host migration, sequence-based reveals, and a trendy word list.",
+  "requestFramePermissions": []
+}

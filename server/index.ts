@@ -26,6 +26,7 @@ const broadcastRoomState = (roomId: string) => {
     if (state) {
         io.to(roomId).emit('game-state-update', state);
     }
+    console.log('board cast room state', state)
 };
 
 io.on('connection', (socket) => {

@@ -23,6 +23,7 @@ const App: React.FC = () => {
   });
 
   const [userName, setUserName] = useState(() => localStorage.getItem('sketch_userName') || '');
+  const [tempName, setTempName] = useState(userName);
   const [showNameModal, setShowNameModal] = useState(!userName);
 
   // Router State
@@ -160,6 +161,7 @@ const App: React.FC = () => {
       players: updatedPlayers,
       guesserId: updatedPlayers[guesserIdx].id,
       currentWord: null,
+      winnerId: null, // Reset winner for the new round
       revealOrder: 0,
       selectableWords: picked
     });
@@ -304,12 +306,12 @@ const App: React.FC = () => {
                 maxLength={15}
                 className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 text-white mb-6"
                 placeholder="Enter name..."
-                value={userName}
-                onChange={(e) => setUserName(e.target.value)}
+                value={tempName}
+                onChange={(e) => setTempName(e.target.value)}
                 autoFocus
               />
               <button
-                onClick={() => handleSetName(userName)}
+                onClick={() => handleSetName(tempName)}
                 className="w-full py-3 bg-green-600 hover:bg-green-500 text-white font-bold rounded-xl transition-all shadow-lg"
               >
                 SAVE & CONTINUE
@@ -525,12 +527,12 @@ const App: React.FC = () => {
               maxLength={15}
               className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 text-white mb-6"
               placeholder="Artist Name..."
-              value={userName}
-              onChange={(e) => setUserName(e.target.value)}
+              value={tempName}
+              onChange={(e) => setTempName(e.target.value)}
               autoFocus
             />
             <button
-              onClick={() => handleSetName(userName)}
+              onClick={() => handleSetName(tempName)}
               className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl transition-all shadow-lg"
             >
               START SKETCHING

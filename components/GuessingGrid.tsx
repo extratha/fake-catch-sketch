@@ -31,8 +31,6 @@ const GuessingGrid: React.FC<GuessingGridProps> = ({
     .filter(p => !p.isGuesser && p.hasFinishedDrawing)
     .sort((a, b) => a.drawingOrder - b.drawingOrder);
 
-  const isHost = players.find(p => p.isHost);
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/90 backdrop-blur-md p-4 sm:p-8">
       <div className="relative w-full max-w-6xl h-full flex flex-col bg-slate-900 rounded-2xl border border-slate-700 shadow-2xl overflow-hidden">
@@ -119,7 +117,7 @@ const GuessingGrid: React.FC<GuessingGridProps> = ({
           ) : (
             <div className="text-center">
               {/* close button show if game is over and peryer is host  */}
-              {isGameOver && isHost ? (
+              {isGameOver ? (
                 <button
                   onClick={onClose}
                   className="px-8 py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl transition-all shadow-lg"

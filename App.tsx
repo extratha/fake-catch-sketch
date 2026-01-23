@@ -138,6 +138,12 @@ const App: React.FC = () => {
   }, [socket, userName, roomPath, joinRoom, gameState, userId, syncState]);
 
   // Actions
+  useEffect(() => {
+    if (gameState.phase === GamePhase.PICKING || gameState.phase === GamePhase.LOBBY) {
+      setCurrentDrawing(null);
+    }
+  }, [gameState.phase]);
+
   const handleSetName = (name: string) => {
     const trimmed = name.trim();
     if (!trimmed) return;
@@ -161,7 +167,8 @@ const App: React.FC = () => {
   };
 
   const startGame = () => {
-    const players = [...gameState.players];
+    setCurrentDrawing(null);
+    const players = [...gameState.players].sort((a, b) => a.id.localeCompare(b.id)); // Sort for stability
     // Pick guesser - if it's the first time, pick host, otherwise pick next
     let guesserIdx = players.findIndex(p => p.id === gameState.guesserId);
     guesserIdx = (guesserIdx + 1) % players.length;
@@ -531,6 +538,7 @@ const App: React.FC = () => {
                   </div>
 
                   <Canvas
+                    key={gameState.currentWord || 'lobby'}
                     disabled={me?.isGuesser || me?.hasFinishedDrawing || gameState.isBoardLocked}
                     onSave={setCurrentDrawing}
                   />

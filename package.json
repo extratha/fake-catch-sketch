@@ -19,5 +19,8 @@
   "devDependencies": {
     "@types/node": "^22.14.0",
     "typescript": "~5.8.2"
+  },
+  "optionalDependencies": {
+    "@rollup/rollup-linux-x64-gnu": "*"
   }
 }

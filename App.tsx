@@ -37,7 +37,9 @@ const App: React.FC = () => {
     currentWord: null,
     guesserId: null,
     winnerId: null,
-    revealOrder: 0
+    revealOrder: 0,
+    selectableWords: null,
+    isBoardLocked: false
   });
 
   const [currentDrawing, setCurrentDrawing] = useState<string | null>(null);
@@ -105,11 +107,29 @@ const App: React.FC = () => {
 
     window.addEventListener('hashchange', handleHash);
 
+    // Drawing Auto-Lock Logic
+    const finishedCount = gameState.players.filter(p => !p.isGuesser && p.hasFinishedDrawing).length;
+    const isHost = gameState.players.find(p => p.id === userId)?.isHost;
+
+    if (gameState.phase === GamePhase.DRAWING && finishedCount > 0 && !gameState.isBoardLocked && isHost) {
+      const timer = setTimeout(() => {
+        syncState({
+          ...gameState,
+          isBoardLocked: true
+        });
+      }, 1000);
+      return () => {
+        clearTimeout(timer);
+        socket.off('game-state-update', onGameStateUpdate);
+        window.removeEventListener('hashchange', handleHash);
+      };
+    }
+
     return () => {
       socket.off('game-state-update', onGameStateUpdate);
       window.removeEventListener('hashchange', handleHash);
     };
-  }, [socket, userName, roomPath, joinRoom, gameState.roomId]);
+  }, [socket, userName, roomPath, joinRoom, gameState, userId, syncState]);
 
   // Actions
   const handleSetName = (name: string) => {
@@ -163,7 +183,8 @@ const App: React.FC = () => {
       currentWord: null,
       winnerId: null, // Reset winner for the new round
       revealOrder: 0,
-      selectableWords: picked
+      selectableWords: picked,
+      isBoardLocked: false
     });
   };
 
@@ -462,7 +483,7 @@ const App: React.FC = () => {
                   </div>
 
                   <Canvas
-                    disabled={me?.isGuesser || me?.hasFinishedDrawing || false}
+                    disabled={me?.isGuesser || me?.hasFinishedDrawing || gameState.isBoardLocked}
                     onSave={setCurrentDrawing}
                   />
 
@@ -491,6 +512,7 @@ const App: React.FC = () => {
                   players={gameState.players}
                   currentRevealIndex={gameState.revealOrder}
                   isGuesser={userId === gameState.guesserId}
+                  myId={userId}
                   word={gameState.currentWord || ''}
                   onClose={nextRound}
                   onCorrect={() => handleGuess(true)}

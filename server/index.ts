@@ -45,7 +45,8 @@ io.on('connection', (socket) => {
                 guesserId: null,
                 winnerId: null,
                 revealOrder: 0,
-                selectableWords: null
+                selectableWords: null,
+                isBoardLocked: false
             });
         }
 
@@ -61,7 +62,7 @@ io.on('connection', (socket) => {
                 name: playerName,
                 score: 0,
                 isHost: state.players.length === 0, // First one is host
-                isGuesser: false,
+                isGuesser: state.guesserId === playerId,
                 hasFinishedDrawing: false,
                 drawingOrder: 0,
                 drawingData: null,

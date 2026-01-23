@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { X, CheckCircle, HelpCircle } from 'lucide-react';
+import { X, CheckCircle, HelpCircle, Pencil } from 'lucide-react';
 import { Player } from '../types';
 
 interface GuessingGridProps {
@@ -12,6 +12,7 @@ interface GuessingGridProps {
   onIncorrect: () => void;
   isGameOver: boolean;
   word: string;
+  myId: string;
 }
 
 const GuessingGrid: React.FC<GuessingGridProps> = ({
@@ -22,14 +23,20 @@ const GuessingGrid: React.FC<GuessingGridProps> = ({
   onCorrect,
   onIncorrect,
   isGameOver,
-  word
+  word,
+  myId
 }) => {
   const [fullscreenImage, setFullscreenImage] = useState<string | null>(null);
 
-  // Filter out the guesser and sort by drawing order
+  // Filter out the guesser and sort: Finished first (by order), then unfinished
   const drawers = players
-    .filter(p => !p.isGuesser && p.hasFinishedDrawing)
-    .sort((a, b) => a.drawingOrder - b.drawingOrder);
+    .filter(p => !p.isGuesser)
+    .sort((a, b) => {
+      if (a.hasFinishedDrawing && b.hasFinishedDrawing) return a.drawingOrder - b.drawingOrder;
+      if (a.hasFinishedDrawing) return -1;
+      if (b.hasFinishedDrawing) return 1;
+      return 0;
+    });
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/90 backdrop-blur-md p-4 sm:p-8">
@@ -67,12 +74,19 @@ const GuessingGrid: React.FC<GuessingGridProps> = ({
                 >
                   {isRevealed ? (
                     <>
-                      <img
-                        src={player.drawingData || ''}
-                        alt={`Drawing by ${player.name}`}
-                        className="w-full h-full object-cover cursor-zoom-in"
-                        onClick={() => setFullscreenImage(player.drawingData)}
-                      />
+                      {player.drawingData ? (
+                        <img
+                          src={player.drawingData}
+                          alt={`Drawing by ${player.name}`}
+                          className="w-full h-full object-cover cursor-zoom-in"
+                          onClick={() => setFullscreenImage(player.drawingData)}
+                        />
+                      ) : (
+                        <div className="w-full h-full flex flex-col items-center justify-center bg-slate-800 text-slate-500">
+                          <Pencil size={40} className="mb-2 opacity-20" />
+                          <p className="text-xs font-black uppercase tracking-tighter">No Sketch</p>
+                        </div>
+                      )}
                       <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-slate-950/80 to-transparent p-3">
                         <p className="text-sm font-bold text-white flex items-center justify-between">
                           <span>{player.name}</span>
@@ -116,16 +130,17 @@ const GuessingGrid: React.FC<GuessingGridProps> = ({
             </div>
           ) : (
             <div className="text-center">
-              {/* close button show if game is over and peryer is host  */}
-              {isGameOver ? (
+              {isGameOver && players.find(p => p.id === myId)?.isHost ? (
                 <button
                   onClick={onClose}
                   className="px-8 py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl transition-all shadow-lg"
                 >
                   Close & Continue
                 </button>
-              ) : (
+              ) : isGameOver ? (
                 <p className="text-slate-400 italic">Waiting for the host to restart the game</p>
+              ) : (
+                <p className="text-slate-400 italic">Waiting for the guesser to decide...</p>
               )}
             </div>
           )}

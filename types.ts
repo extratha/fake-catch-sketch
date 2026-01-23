@@ -27,6 +27,7 @@ export interface GameState {
   winnerId: string | null;
   revealOrder: number; // Current index in the drawing sequence being guessed
   selectableWords: string[] | null;
+  isBoardLocked: boolean;
 }
 
 export interface SocketEvent {

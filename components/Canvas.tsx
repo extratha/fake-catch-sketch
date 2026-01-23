@@ -43,12 +43,14 @@ const Canvas: React.FC<CanvasProps> = ({ onSave, disabled, color = "#f8fafc", li
 
   const startDrawing = (e: React.MouseEvent | React.TouchEvent) => {
     if (disabled) return;
+    if ('touches' in e && e.cancelable) e.preventDefault();
     setIsDrawing(true);
     lastPos.current = getPos(e);
   };
 
   const draw = useCallback((e: React.MouseEvent | React.TouchEvent) => {
     if (!isDrawing || disabled) return;
+    if ('touches' in e && e.cancelable) e.preventDefault();
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
@@ -96,7 +98,10 @@ const Canvas: React.FC<CanvasProps> = ({ onSave, disabled, color = "#f8fafc", li
         ref={canvasRef}
         width={800}
         height={600}
-        style={{ cursor: disabled ? 'default' : pencilCursor }}
+        style={{
+          cursor: disabled ? 'default' : pencilCursor,
+          touchAction: 'none'
+        }}
         className={`w-full h-full ${disabled ? 'opacity-80' : ''}`}
         onMouseDown={startDrawing}
         onMouseMove={draw}

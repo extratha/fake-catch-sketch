@@ -8,7 +8,7 @@ interface CanvasProps {
   lineWidth?: number;
 }
 
-const Canvas: React.FC<CanvasProps> = ({ onSave, disabled, color = "#f8fafc", lineWidth = 4 }) => {
+const Canvas: React.FC<CanvasProps> = ({ onSave, disabled, color = "#f8fafc", lineWidth = 3 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const lastPos = useRef({ x: 0, y: 0 });
@@ -28,11 +28,16 @@ const Canvas: React.FC<CanvasProps> = ({ onSave, disabled, color = "#f8fafc", li
     const canvas = canvasRef.current;
     if (!canvas) return { x: 0, y: 0 };
     const rect = canvas.getBoundingClientRect();
-    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
-    const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+    const clientX = 'touches' in e ? e.touches[0].clientX : (e as React.MouseEvent).clientX;
+    const clientY = 'touches' in e ? e.touches[0].clientY : (e as React.MouseEvent).clientY;
+
+    // Calculate scale factor between internal canvas size and display size
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+
     return {
-      x: clientX - rect.left,
-      y: clientY - rect.top
+      x: (clientX - rect.left) * scaleX,
+      y: (clientY - rect.top) * scaleY
     };
   };
 

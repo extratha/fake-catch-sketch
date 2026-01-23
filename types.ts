@@ -15,6 +15,7 @@ export interface Player {
   hasFinishedDrawing: boolean;
   drawingOrder: number; // 0 means not finished
   drawingData: string | null; // base64 image data
+  socketId?: string; // Socket.io ID for disconnection tracking
 }
 
 export interface GameState {
@@ -25,6 +26,7 @@ export interface GameState {
   guesserId: string | null;
   winnerId: string | null;
   revealOrder: number; // Current index in the drawing sequence being guessed
+  selectableWords: string[] | null;
 }
 
 export interface SocketEvent {

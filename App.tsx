@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { WORD_LIST, MAX_STARS } from './constants';
 import { GamePhase, GameState, Player } from './types';
-import MockSocket from './services/mockSocket';
+import { io } from 'socket.io-client';
 import ScoreStars from './components/ScoreStars';
 import PlayerBoard from './components/PlayerBoard';
 import Canvas from './components/Canvas';
@@ -10,7 +10,7 @@ import GuessingGrid from './components/GuessingGrid';
 import { Pencil, Trophy, Send, Users, LogOut, Info } from 'lucide-react';
 
 // Utils
-const generateId = () => Math.random().toString(36).substring(2, 9);
+const generateId = () => Math.random().toString(36).substring(2, 7);
 
 const App: React.FC = () => {
   // Persistence
@@ -43,37 +43,72 @@ const App: React.FC = () => {
   const [randomWords, setRandomWords] = useState<string[]>([]);
 
   // Socket setup
-  const socket = useMemo(() => new MockSocket(userId), [userId]);
+  const socket = useMemo(() => io('http://localhost:3001', { autoConnect: true }), []);
 
-  // Sync logic (In real app, this would be handled by a server emitting to rooms)
+  // Sync logic
   const syncState = useCallback((newState: GameState) => {
     setGameState(newState);
-    socket.emit('state_update', newState);
+    if (newState.roomId) {
+      socket.emit('game-state-update', { roomId: newState.roomId, state: newState });
+    }
   }, [socket]);
 
+  const joinRoom = useCallback((rId: string, name: string) => {
+    if (!rId || !name) return;
+
+    // Set local state immediately to avoid UI flicker
+    setGameState(prev => ({
+      ...prev,
+      roomId: rId,
+      players: prev.players.some(p => p.id === userId)
+        ? prev.players
+        : [...prev.players, {
+          id: userId,
+          name,
+          score: 0,
+          isHost: false,
+          isGuesser: false,
+          hasFinishedDrawing: false,
+          drawingOrder: 0,
+          drawingData: null
+        }]
+    }));
+
+    setRoomPath(rId);
+    window.location.hash = `#/rooms/${rId}`;
+    socket.emit('join-room', { roomId: rId, playerName: name, playerId: userId });
+  }, [socket, userId]);
+
   useEffect(() => {
-    socket.on('state_update', (receivedState: GameState) => {
+    const onGameStateUpdate = (receivedState: GameState) => {
       setGameState(receivedState);
-    });
+    };
 
-    socket.on('player_joined', (player: Player) => {
-      setGameState(prev => {
-        if (prev.players.find(p => p.id === player.id)) return prev;
-        const updated = { ...prev, players: [...prev.players, player] };
-        return updated;
-      });
-    });
+    socket.on('game-state-update', onGameStateUpdate);
 
-    // Handle initial routing if hash changes
+    // Initial join check if we have a name and room
+    if (userName && roomPath && gameState.roomId !== roomPath) {
+      joinRoom(roomPath, userName);
+    }
+
+    // Handle hash changes for navigation
     const handleHash = () => {
       const hash = window.location.hash.replace('#/rooms/', '');
       setRoomPath(hash);
-      if (hash && !userName) setShowNameModal(true);
+
+      // Auto-join if hash changes and we have a name
+      if (hash && userName) {
+        joinRoom(hash, userName);
+      }
     };
 
     window.addEventListener('hashchange', handleHash);
-    return () => window.removeEventListener('hashchange', handleHash);
-  }, [socket, userName]);
+
+    return () => {
+      socket.off('game-state-update', onGameStateUpdate);
+      window.removeEventListener('hashchange', handleHash);
+    };
+  }, [socket, userName, roomPath, joinRoom, gameState.roomId]);
 
   // Actions
   const handleSetName = (name: string) => {
@@ -92,45 +127,10 @@ const App: React.FC = () => {
   const createRoom = () => {
     if (!userName) return setShowNameModal(true);
     const newRoomId = generateId();
-    const host: Player = {
-      id: userId,
-      name: userName,
-      score: 0,
-      isHost: true,
-      isGuesser: false,
-      hasFinishedDrawing: false,
-      drawingOrder: 0,
-      drawingData: null
-    };
-    const newState: GameState = {
-      roomId: newRoomId,
-      phase: GamePhase.LOBBY,
-      players: [host],
-      currentWord: null,
-      guesserId: null,
-      winnerId: null,
-      revealOrder: 0
-    };
-    setGameState(newState);
+
     setRoomPath(newRoomId);
     window.location.hash = `#/rooms/${newRoomId}`;
-    socket.emit('state_update', newState);
-  };
-
-  const joinRoom = (rId: string, name: string) => {
-    const newPlayer: Player = {
-      id: userId,
-      name,
-      score: 0,
-      isHost: false,
-      isGuesser: false,
-      hasFinishedDrawing: false,
-      drawingOrder: 0,
-      drawingData: null
-    };
-    socket.emit('player_joined', newPlayer);
-    setRoomPath(rId);
-    window.location.hash = `#/rooms/${rId}`;
+    socket.emit('join-room', { roomId: newRoomId, playerName: userName });
   };
 
   const startGame = () => {
@@ -138,7 +138,7 @@ const App: React.FC = () => {
     // Pick guesser - if it's the first time, pick host, otherwise pick next
     let guesserIdx = players.findIndex(p => p.id === gameState.guesserId);
     guesserIdx = (guesserIdx + 1) % players.length;
-    
+
     const updatedPlayers = players.map((p, idx) => ({
       ...p,
       isGuesser: idx === guesserIdx,
@@ -147,29 +147,30 @@ const App: React.FC = () => {
       drawingData: null
     }));
 
-    syncState({
-      ...gameState,
-      phase: GamePhase.PICKING,
-      players: updatedPlayers,
-      guesserId: updatedPlayers[guesserIdx].id,
-      currentWord: null,
-      revealOrder: 0
-    });
-
     // Generate random words
     const picked: string[] = [];
     while (picked.length < 3) {
       const w = WORD_LIST[Math.floor(Math.random() * WORD_LIST.length)];
       if (!picked.includes(w)) picked.push(w);
     }
-    setRandomWords(picked);
+
+    syncState({
+      ...gameState,
+      phase: GamePhase.PICKING,
+      players: updatedPlayers,
+      guesserId: updatedPlayers[guesserIdx].id,
+      currentWord: null,
+      revealOrder: 0,
+      selectableWords: picked
+    });
   };
 
   const selectWord = (word: string) => {
     syncState({
       ...gameState,
       phase: GamePhase.DRAWING,
-      currentWord: word
+      currentWord: word,
+      selectableWords: null // Clear words after picking
     });
   };
 
@@ -177,7 +178,7 @@ const App: React.FC = () => {
     const players = [...gameState.players];
     const finishedCount = players.filter(p => p.hasFinishedDrawing).length;
     const myIdx = players.findIndex(p => p.id === userId);
-    
+
     if (myIdx === -1) return;
 
     players[myIdx].hasFinishedDrawing = true;
@@ -204,7 +205,7 @@ const App: React.FC = () => {
       // points = 1 if revealedOrder >= 2
       const points = Math.max(1, 3 - gameState.revealOrder);
       const players = [...gameState.players];
-      
+
       // Give points to guesser
       const gIdx = players.findIndex(p => p.id === gameState.guesserId);
       if (gIdx !== -1) players[gIdx].score += points;
@@ -213,7 +214,7 @@ const App: React.FC = () => {
       const currentDrawer = players
         .filter(p => !p.isGuesser)
         .sort((a, b) => a.drawingOrder - b.drawingOrder)[gameState.revealOrder];
-      
+
       if (currentDrawer) {
         const dIdx = players.findIndex(p => p.id === currentDrawer.id);
         if (dIdx !== -1) players[dIdx].score += points;
@@ -269,12 +270,12 @@ const App: React.FC = () => {
             <div className="inline-flex items-center justify-center w-20 h-20 bg-blue-500 rounded-2xl mb-4 rotate-3 shadow-lg shadow-blue-500/20">
               <Pencil size={40} className="text-white -rotate-12" />
             </div>
-            <h1 className="text-4xl font-black text-white tracking-tight">Cat Sketch</h1>
+            <h1 className="text-4xl font-black text-white tracking-tight">Catch Sketch</h1>
             <p className="text-slate-400 font-medium">Draw faster, guess better!</p>
           </div>
 
           <div className="space-y-4">
-            <button 
+            <button
               onClick={createRoom}
               className="w-full py-4 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-2xl transition-all active:scale-95 shadow-lg shadow-blue-600/20 border-b-4 border-blue-800"
             >
@@ -298,8 +299,8 @@ const App: React.FC = () => {
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4">
             <div className="w-full max-w-sm bg-slate-800 rounded-2xl p-6 border border-slate-700 shadow-2xl">
               <h2 className="text-xl font-bold mb-4">What's your artist name?</h2>
-              <input 
-                type="text" 
+              <input
+                type="text"
                 maxLength={15}
                 className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 text-white mb-6"
                 placeholder="Enter name..."
@@ -307,7 +308,7 @@ const App: React.FC = () => {
                 onChange={(e) => setUserName(e.target.value)}
                 autoFocus
               />
-              <button 
+              <button
                 onClick={() => handleSetName(userName)}
                 className="w-full py-3 bg-green-600 hover:bg-green-500 text-white font-bold rounded-xl transition-all shadow-lg"
               >
@@ -339,9 +340,9 @@ const App: React.FC = () => {
             </p>
           </div>
         </div>
-        
+
         <div className="flex gap-2">
-          <button 
+          <button
             onClick={() => {
               navigator.clipboard.writeText(window.location.href);
               alert('Link copied to clipboard!');
@@ -351,7 +352,7 @@ const App: React.FC = () => {
             <Send size={16} className="text-blue-400" />
             Copy Link
           </button>
-          <button 
+          <button
             onClick={leaveRoom}
             className="flex items-center gap-2 px-4 py-2 bg-red-900/20 hover:bg-red-900/40 text-red-400 rounded-lg text-sm font-bold border border-red-800/30 transition-all"
           >
@@ -365,8 +366,14 @@ const App: React.FC = () => {
         {/* Main Board Area */}
         <div className="lg:col-span-3 flex flex-col gap-4">
           <div className="bg-slate-800 rounded-xl overflow-hidden shadow-2xl border border-slate-700">
+            {gameState.phase === GamePhase.DRAWING && !me?.isGuesser && (
+              <div className="bg-blue-600/20 py-3 px-4 flex items-center justify-center gap-3 border-b border-slate-700">
+                <span className="text-xs font-black text-blue-400 uppercase tracking-widest">Your Word:</span>
+                <span className="text-2xl font-black text-white uppercase tracking-tighter">{gameState.currentWord}</span>
+              </div>
+            )}
             <ScoreStars score={totalStars % MAX_STARS || (totalStars > 0 ? MAX_STARS : 0)} />
-            
+
             <div className="relative">
               {gameState.phase === GamePhase.LOBBY && (
                 <div className="aspect-[4/3] flex flex-col items-center justify-center bg-slate-900/50 p-8 text-center">
@@ -375,16 +382,15 @@ const App: React.FC = () => {
                   </div>
                   <h2 className="text-2xl font-bold mb-2">Welcome to the Lobby</h2>
                   <p className="text-slate-400 mb-8 max-w-md">Wait for more players to join or start the round if you're the host.</p>
-                  
+
                   {me?.isHost ? (
-                    <button 
+                    <button
                       onClick={startGame}
                       disabled={gameState.players.length < 2}
-                      className={`px-12 py-4 rounded-2xl font-black text-xl transition-all shadow-xl ${
-                        gameState.players.length < 2 
-                          ? 'bg-slate-700 text-slate-500 cursor-not-allowed' 
-                          : 'bg-green-600 hover:bg-green-500 text-white border-b-4 border-green-800 active:translate-y-1'
-                      }`}
+                      className={`px-12 py-4 rounded-2xl font-black text-xl transition-all shadow-xl ${gameState.players.length < 2
+                        ? 'bg-slate-700 text-slate-500 cursor-not-allowed'
+                        : 'bg-green-600 hover:bg-green-500 text-white border-b-4 border-green-800 active:translate-y-1'
+                        }`}
                     >
                       {gameState.players.length < 2 ? 'WAITING FOR PLAYERS...' : 'START ROUND!'}
                     </button>
@@ -401,16 +407,19 @@ const App: React.FC = () => {
                   {me?.isGuesser ? (
                     <>
                       <h2 className="text-2xl font-black mb-6 flex items-center gap-3">
-                        <span className="text-yellow-400">PICK A WORD</span>
+                        <span className="text-yellow-400 uppercase tracking-widest">Pick a Card</span>
                       </h2>
-                      <div className="flex flex-wrap justify-center gap-4">
-                        {randomWords.map((word) => (
+                      <div className="flex flex-wrap justify-center gap-6">
+                        {gameState.selectableWords?.map((word, idx) => (
                           <button
                             key={word}
                             onClick={() => selectWord(word)}
-                            className="px-8 py-4 bg-slate-800 hover:bg-blue-600 text-white font-bold rounded-2xl border border-slate-700 hover:border-blue-400 transition-all shadow-lg text-lg capitalize"
+                            className="w-32 h-44 bg-blue-600 hover:bg-blue-500 rounded-xl flex flex-col items-center justify-center gap-4 border-4 border-blue-400 transition-all hover:scale-105 shadow-2xl group"
                           >
-                            {word}
+                            <div className="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center font-black text-white text-xl">
+                              ?
+                            </div>
+                            <span className="text-white font-black text-xs uppercase tracking-tighter opacity-50">Card {idx + 1}</span>
                           </button>
                         ))}
                       </div>
@@ -431,31 +440,33 @@ const App: React.FC = () => {
               {gameState.phase === GamePhase.DRAWING && (
                 <div className="p-4 bg-slate-900/50">
                   <div className="mb-4 flex justify-between items-center bg-slate-800 p-4 rounded-xl border border-slate-700">
-                    <div>
-                      <span className="text-xs font-bold text-slate-500 uppercase block">Topic to Draw</span>
-                      <p className="text-2xl font-black text-yellow-400 capitalize">{gameState.currentWord}</p>
-                    </div>
                     {me?.isGuesser ? (
-                      <div className="text-right">
+                      <div className="text-center w-full py-4">
                         <span className="text-xs font-bold text-slate-500 uppercase block">Status</span>
-                        <p className="text-blue-400 font-bold">You are Guessing!</p>
+                        <p className="text-blue-400 font-black text-xl">WAITING FOR OTHERS TO DRAW...</p>
                       </div>
                     ) : (
-                      <div className="text-right">
-                         <span className="text-xs font-bold text-slate-500 uppercase block">Progress</span>
-                         <p className="font-bold">{gameState.players.filter(p => p.hasFinishedDrawing).length} / {gameState.players.length - 1} Finished</p>
-                      </div>
+                      <>
+                        <div>
+                          <span className="text-xs font-bold text-slate-500 uppercase block">Topic to Draw</span>
+                          <p className="text-2xl font-black text-yellow-400 capitalize">{gameState.currentWord}</p>
+                        </div>
+                        <div className="text-right">
+                          <span className="text-xs font-bold text-slate-500 uppercase block">Progress</span>
+                          <p className="font-bold">{gameState.players.filter(p => p.hasFinishedDrawing).length} / {gameState.players.length - 1} Finished</p>
+                        </div>
+                      </>
                     )}
                   </div>
-                  
-                  <Canvas 
-                    disabled={me?.isGuesser || me?.hasFinishedDrawing || false} 
-                    onSave={setCurrentDrawing} 
+
+                  <Canvas
+                    disabled={me?.isGuesser || me?.hasFinishedDrawing || false}
+                    onSave={setCurrentDrawing}
                   />
 
                   {!me?.isGuesser && !me?.hasFinishedDrawing && (
                     <div className="mt-4 flex justify-center">
-                      <button 
+                      <button
                         onClick={finishDrawing}
                         className="px-12 py-4 bg-green-600 hover:bg-green-500 text-white font-black text-xl rounded-2xl shadow-lg shadow-green-600/20 transition-all border-b-4 border-green-800 active:translate-y-1"
                       >
@@ -474,7 +485,7 @@ const App: React.FC = () => {
               )}
 
               {gameState.phase === GamePhase.GUESSING && (
-                <GuessingGrid 
+                <GuessingGrid
                   players={gameState.players}
                   currentRevealIndex={gameState.revealOrder}
                   isGuesser={userId === gameState.guesserId}
@@ -497,7 +508,7 @@ const App: React.FC = () => {
 
       {/* Footer Info */}
       <div className="max-w-7xl mx-auto w-full mt-6 py-4 flex flex-col sm:flex-row justify-between items-center text-slate-500 text-xs font-bold gap-4">
-        <p>&copy; 2024 CAT SKETCH MULTIPLAYER</p>
+        <p>&copy; 2024 CATCH SKETCH MULTIPLAYER</p>
         <div className="flex gap-6">
           <span className="flex items-center gap-1"><Trophy size={14} className="text-yellow-500" /> Collect Stars</span>
           <span className="flex items-center gap-1"><Pencil size={14} className="text-blue-500" /> Draw Sequences</span>
@@ -509,8 +520,8 @@ const App: React.FC = () => {
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4">
           <div className="w-full max-w-sm bg-slate-800 rounded-2xl p-6 border border-slate-700 shadow-2xl">
             <h2 className="text-xl font-bold mb-4">Set your display name</h2>
-            <input 
-              type="text" 
+            <input
+              type="text"
               maxLength={15}
               className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 text-white mb-6"
               placeholder="Artist Name..."
@@ -518,7 +529,7 @@ const App: React.FC = () => {
               onChange={(e) => setUserName(e.target.value)}
               autoFocus
             />
-            <button 
+            <button
               onClick={() => handleSetName(userName)}
               className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl transition-all shadow-lg"
             >

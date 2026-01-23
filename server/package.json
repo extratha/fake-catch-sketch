@@ -1,0 +1,23 @@
+{
+    "name": "cat-sketch-server",
+    "version": "1.0.0",
+    "description": "Socket.io server for cat-sketch-multiplayer",
+    "main": "index.ts",
+    "type": "module",
+    "scripts": {
+        "start": "tsx index.ts",
+        "dev": "tsx --watch index.ts"
+    },
+    "dependencies": {
+        "cors": "^2.8.5",
+        "express": "^4.21.2",
+        "socket.io": "^4.8.1"
+    },
+    "devDependencies": {
+        "@types/cors": "^2.8.19",
+        "@types/express": "^5.0.6",
+        "@types/node": "^25.0.10",
+        "tsx": "^4.21.0",
+        "typescript": "^5.9.3"
+    }
+}

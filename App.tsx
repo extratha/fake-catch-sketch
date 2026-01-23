@@ -121,7 +121,7 @@ const App: React.FC = () => {
           ...gameState,
           isBoardLocked: true
         });
-      }, 1000);
+      }, 400);
       return () => {
         clearTimeout(timer);
         socket.off('game-state-update', onGameStateUpdate);

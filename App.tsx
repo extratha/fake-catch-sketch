@@ -46,7 +46,11 @@ const App: React.FC = () => {
   const [randomWords, setRandomWords] = useState<string[]>([]);
 
   // Socket setup
-  const socket = useMemo(() => io('http://localhost:3001', { autoConnect: true }), []);
+  const socket = useMemo(() => {
+    const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    const socketUrl = (import.meta as any).env.VITE_SOCKET_URL || (isLocal ? 'http://localhost:3001' : window.location.origin);
+    return io(socketUrl, { autoConnect: true });
+  }, []);
 
   // Sync logic
   const syncState = useCallback((newState: GameState) => {

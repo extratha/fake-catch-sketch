@@ -25,7 +25,7 @@ const PlayerBoard: React.FC<PlayerBoardProps> = ({ players, myId }) => {
               }`}
           >
             <div className="relative">
-              <div className="w-10 h-10 bg-slate-600 rounded-full flex items-center justify-center font-bold text-slate-200">
+              <div className="w-10 h-10  bg-slate-600 rounded-full flex items-center justify-center font-bold text-slate-200">
                 {p.name.charAt(0).toUpperCase()}
               </div>
               {p.isHost && (
@@ -36,7 +36,7 @@ const PlayerBoard: React.FC<PlayerBoardProps> = ({ players, myId }) => {
             </div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-1">
-                <p className="font-medium  text-slate-200">
+                <p className="font-medium truncate text-slate-200">
                   {p.name} {p.id === myId && <span className="text-sm text-blue-400 font-bold ml-1">(You)</span>}
                 </p>
                 {p.isGuesser && <Eye size={14} className="text-purple-400" />}

@@ -121,7 +121,7 @@ const App: React.FC = () => {
     const finishedCount = gameState.players.filter(p => !p.isGuesser && p.hasFinishedDrawing).length;
     const isHost = gameState.players.find(p => p.id === userId)?.isHost;
 
-    if (gameState.phase === GamePhase.DRAWING && finishedCount > 0 && !gameState.isBoardLocked && isHost) {
+    if (gameState.phase === GamePhase.DRAWING && finishedCount > 1 && !gameState.isBoardLocked && isHost) {
       const timer = setTimeout(() => {
         syncState({
           ...gameState,

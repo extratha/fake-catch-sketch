@@ -129,7 +129,7 @@ const Canvas: React.FC<CanvasProps> = ({ onSave, me, disabled, color = "#f8fafc"
             <div className="animate-pulse space-y-4">
               <div className="bg-red-600 text-white px-8 py-4 rounded-2xl border-4 border-red-400 shadow-[0_0_30px_rgba(220,38,38,0.5)]">
                 <p className="text-2xl font-black uppercase tracking-tighter">BOARD LOCKED!</p>
-                <p className="text-sm font-bold opacity-90">Someone finished! Click 'I'M DONE' now!</p>
+                <p className="text-sm font-bold opacity-90">Second player just finished! Click 'I'M DONE' now!</p>
               </div>
             </div>
           ) : (

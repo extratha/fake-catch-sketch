@@ -10,6 +10,7 @@ export const WORD_LIST = [
   "เด็กแว๊น", "แว่นกันแดด", "สูท", "ช็อกโกแลต", "สายลับ", "จรวด", "หุ่นยนต์", "Alien", "ฮอบบิท", "โล่",
 
   // 30 Trendy/Funny Nouns
+  "Cry Baby", "La Bu Bu",
   "Skibidi Toilet", "NPC", "Meme", "Influencer", "Crypto Coin", "Bitcoin", "Diamond Hands", "หนุ่มซิกม่า หน้าคม คางตูด",
   "Doge", "เครื่องดื่มชูกำลัง", "Gaming Chair", "Twitch Streamer", "ไม้เซลฟี่", "แว่น VR", "ชานมไข่มุก", "TikTok",
   "Golden Retriever Energy", "ตบ", "กาชา", "กล่องสุ่ม"

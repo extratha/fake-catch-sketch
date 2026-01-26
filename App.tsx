@@ -7,7 +7,7 @@ import ScoreStars from './components/ScoreStars';
 import PlayerBoard from './components/PlayerBoard';
 import Canvas from './components/Canvas';
 import GuessingGrid from './components/GuessingGrid';
-import { Pencil, Trophy, Send, Users, LogOut, Info } from 'lucide-react';
+import { Pencil, Trophy, Send, Users, LogOut, Info, RotateCcw } from 'lucide-react';
 
 // Utils
 const generateId = () => Math.random().toString(36).substring(2, 7);
@@ -207,6 +207,28 @@ const App: React.FC = () => {
       phase: GamePhase.DRAWING,
       currentWord: word,
       selectableWords: null // Clear words after picking
+    });
+  };
+
+  const rerollWord = () => {
+    let newWord = WORD_LIST[Math.floor(Math.random() * WORD_LIST.length)];
+    while (newWord === gameState.currentWord) {
+      newWord = WORD_LIST[Math.floor(Math.random() * WORD_LIST.length)];
+    }
+
+    const updatedPlayers = gameState.players.map(p => ({
+      ...p,
+      hasFinishedDrawing: false,
+      drawingOrder: 0,
+      drawingData: null
+    }));
+
+    syncState({
+      ...gameState,
+      currentWord: newWord,
+      players: updatedPlayers,
+      isBoardLocked: false,
+      revealOrder: 0
     });
   };
 
@@ -519,9 +541,18 @@ const App: React.FC = () => {
                 <div className="p-4 bg-slate-900/50">
                   <div className="mb-4 flex justify-between items-center bg-slate-800 p-4 rounded-xl border border-slate-700">
                     {me?.isGuesser ? (
-                      <div className="text-center w-full py-4">
-                        <span className="text-xs font-bold text-slate-500 uppercase block">Status</span>
-                        <p className="text-blue-400 font-black text-xl">WAITING FOR OTHERS TO DRAW...</p>
+                      <div className="text-center w-full py-4 space-y-4">
+                        <div>
+                          <span className="text-xs font-bold text-slate-500 uppercase block">Status</span>
+                          <p className="text-blue-400 font-black text-xl">WAITING FOR OTHERS TO DRAW...</p>
+                        </div>
+                        <button
+                          onClick={rerollWord}
+                          className="px-6 py-2 bg-yellow-600 hover:bg-yellow-500 text-white font-bold rounded-xl transition-all shadow-lg border-b-4 border-yellow-800 active:translate-y-1 flex items-center gap-2 mx-auto"
+                        >
+                          <RotateCcw size={18} />
+                          RANDOM NEW WORD
+                        </button>
                       </div>
                     ) : (
                       <>

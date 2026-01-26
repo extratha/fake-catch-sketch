@@ -8,6 +8,7 @@ interface GuessingGridProps {
   currentRevealIndex: number; // Order index currently being shown
   isGuesser: boolean;
   onClose: () => void;
+  onNextRound: () => void;
   onCorrect: () => void;
   onIncorrect: () => void;
   isGameOver: boolean;
@@ -20,6 +21,7 @@ const GuessingGrid: React.FC<GuessingGridProps> = ({
   currentRevealIndex,
   isGuesser,
   onClose,
+  onNextRound,
   onCorrect,
   onIncorrect,
   isGameOver,
@@ -55,6 +57,7 @@ const GuessingGrid: React.FC<GuessingGridProps> = ({
                 : `Revealing drawing #${currentRevealIndex + 1} of ${drawers.length}`}
             </p>
           </div>
+          <X className="text-white cursor-pointer" onClick={onClose} />
         </div>
 
         {/* Grid Content */}
@@ -132,7 +135,7 @@ const GuessingGrid: React.FC<GuessingGridProps> = ({
             <div className="text-center">
               {isGameOver && players.find(p => p.id === myId)?.isHost ? (
                 <button
-                  onClick={onClose}
+                  onClick={onNextRound}
                   className="px-8 py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl transition-all shadow-lg"
                 >
                   Close & Continue

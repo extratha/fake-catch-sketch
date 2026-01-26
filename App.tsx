@@ -7,7 +7,7 @@ import ScoreStars from './components/ScoreStars';
 import PlayerBoard from './components/PlayerBoard';
 import Canvas from './components/Canvas';
 import GuessingGrid from './components/GuessingGrid';
-import { Pencil, Trophy, Send, Users, LogOut, Info, RotateCcw } from 'lucide-react';
+import { Pencil, Trophy, Send, Users, LogOut, Info, RotateCcw, HelpCircle } from 'lucide-react';
 
 // Utils
 const generateId = () => Math.random().toString(36).substring(2, 7);
@@ -45,6 +45,7 @@ const App: React.FC = () => {
   const [currentDrawing, setCurrentDrawing] = useState<string | null>(null);
   const [randomWords, setRandomWords] = useState<string[]>([]);
   const [activeRooms, setActiveRooms] = useState<{ id: string, playerCount: number, phase: string }[]>([]);
+  const [showGuessingBoard, setShowGuessingBoard] = useState(false);
 
   // Socket setup
   const socket = useMemo(() => {
@@ -89,6 +90,9 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const onGameStateUpdate = (receivedState: GameState) => {
+      if (receivedState.phase === GamePhase.GUESSING && gameState.phase !== GamePhase.GUESSING) {
+        setShowGuessingBoard(true);
+      }
       setGameState(receivedState);
     };
 
@@ -303,6 +307,10 @@ const App: React.FC = () => {
       }
     }
   };
+
+  const handleCloseGuessingboard = () => {
+
+  }
 
   const nextRound = () => {
     startGame();
@@ -570,8 +578,10 @@ const App: React.FC = () => {
 
                   <Canvas
                     key={gameState.currentWord || 'lobby'}
+                    me={me}
                     disabled={me?.isGuesser || me?.hasFinishedDrawing || gameState.isBoardLocked}
                     onSave={setCurrentDrawing}
+                    isBoardLocked={gameState.isBoardLocked}
                   />
 
                   {!me?.isGuesser && !me?.hasFinishedDrawing && (
@@ -595,13 +605,27 @@ const App: React.FC = () => {
               )}
 
               {gameState.phase === GamePhase.GUESSING && (
+                <div className="p-4 bg-slate-900/50 flex flex-col items-center justify-center min-h-[300px]">
+                  <p className="text-xl font-bold text-slate-400 mb-6 uppercase tracking-widest">Guessing Phase in Progress</p>
+                  <button
+                    onClick={() => setShowGuessingBoard(true)}
+                    className="px-8 py-3 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded-xl transition-all shadow-lg flex items-center gap-2"
+                  >
+                    <HelpCircle size={20} />
+                    OPEN GUESSING BOARD
+                  </button>
+                </div>
+              )}
+
+              {gameState.phase === GamePhase.GUESSING && showGuessingBoard && (
                 <GuessingGrid
                   players={gameState.players}
                   currentRevealIndex={gameState.revealOrder}
                   isGuesser={userId === gameState.guesserId}
                   myId={userId}
                   word={gameState.currentWord || ''}
-                  onClose={nextRound}
+                  onClose={() => setShowGuessingBoard(false)}
+                  onNextRound={nextRound}
                   onCorrect={() => handleGuess(true)}
                   onIncorrect={() => handleGuess(false)}
                   isGameOver={!!gameState.winnerId}

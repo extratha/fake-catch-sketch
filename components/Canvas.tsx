@@ -1,14 +1,17 @@
 
+import { Player } from '@/types';
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 
 interface CanvasProps {
   onSave: (dataUrl: string) => void;
+  me: Player;
   disabled: boolean;
   color?: string;
   lineWidth?: number;
+  isBoardLocked?: boolean;
 }
 
-const Canvas: React.FC<CanvasProps> = ({ onSave, disabled, color = "#f8fafc", lineWidth = 3 }) => {
+const Canvas: React.FC<CanvasProps> = ({ onSave, me, disabled, color = "#f8fafc", lineWidth = 3, isBoardLocked = false }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const lastPos = useRef({ x: 0, y: 0 });
@@ -94,6 +97,7 @@ const Canvas: React.FC<CanvasProps> = ({ onSave, disabled, color = "#f8fafc", li
 
   return (
     <div className="relative w-full aspect-[4/3] bg-slate-800 rounded-lg overflow-hidden border-2 border-slate-700">
+
       <canvas
         ref={canvasRef}
         width={800}
@@ -120,10 +124,19 @@ const Canvas: React.FC<CanvasProps> = ({ onSave, disabled, color = "#f8fafc", li
         </button>
       )}
       {disabled && (
-        <div className="absolute inset-0 flex items-center justify-center bg-slate-900/20 pointer-events-none">
-          <span className="bg-slate-900/80 px-4 py-2 rounded-full border border-slate-700 text-sm font-semibold">
-            Canvas Locked
-          </span>
+        <div className={`absolute inset-0 flex flex-col items-center justify-center p-6 text-center transition-all  pointer-events-none`}>
+          {!me.isGuesser && !me.hasFinishedDrawing && isBoardLocked ? (
+            <div className="animate-pulse space-y-4">
+              <div className="bg-red-600 text-white px-8 py-4 rounded-2xl border-4 border-red-400 shadow-[0_0_30px_rgba(220,38,38,0.5)]">
+                <p className="text-2xl font-black uppercase tracking-tighter">BOARD LOCKED!</p>
+                <p className="text-sm font-bold opacity-90">Someone finished! Click 'I'M DONE' now!</p>
+              </div>
+            </div>
+          ) : (
+            <span className="bg-slate-900/80 px-4 py-2 rounded-full border border-slate-700 text-sm font-semibold">
+              Canvas Locked
+            </span>
+          )}
         </div>
       )}
     </div>

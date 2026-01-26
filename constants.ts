@@ -11,9 +11,9 @@ export const WORD_LIST = [
 
   // 30 Trendy/Funny Nouns
   "Cry Baby", "La Bu Bu",
-  "Skibidi Toilet", "NPC", "Meme", "Influencer", "Crypto Coin", "Bitcoin", "Diamond Hands", "หนุ่มซิกม่า หน้าคม คางตูด",
+  "Skibidi Toilet", "NPC", "Meme", "Influencer", "Crypto Coin", "Bitcoin", "Diamond", "หนุ่มซิกม่า หน้าคม คางตูด",
   "Doge", "เครื่องดื่มชูกำลัง", "Gaming Chair", "Twitch Streamer", "ไม้เซลฟี่", "แว่น VR", "ชานมไข่มุก", "TikTok",
-  "Golden Retriever Energy", "ตบ", "กาชา", "กล่องสุ่ม"
+  "Golden Retriever Energy", "กาชา",
 ];
 
 export const MAX_STARS = 15;

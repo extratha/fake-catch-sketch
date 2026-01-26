@@ -12,7 +12,7 @@ export const WORD_LIST = [
   // 30 Trendy/Funny Nouns
   "Skibidi Toilet", "NPC", "Meme", "Influencer", "Crypto Coin", "Bitcoin", "Diamond Hands", "หนุ่มซิกม่า หน้าคม คางตูด",
   "Doge", "เครื่องดื่มชูกำลัง", "Gaming Chair", "Twitch Streamer", "ไม้เซลฟี่", "แว่น VR", "ชานมไข่มุก", "TikTok",
-  "Pizza Rat", "Golden Retriever Energy", "Cringe", "ตบ", "กาชา", "กล่องสุ่ม"
+  "Golden Retriever Energy", "ตบ", "กาชา", "กล่องสุ่ม"
 ];
 
 export const MAX_STARS = 15;

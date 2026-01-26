@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { WORD_LIST, MAX_STARS } from './constants';
-import { GamePhase, GameState, Player } from './types';
+import { GamePhase, GameState } from './types';
 import { io } from 'socket.io-client';
 import ScoreStars from './components/ScoreStars';
 import PlayerBoard from './components/PlayerBoard';

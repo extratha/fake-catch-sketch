@@ -605,15 +605,32 @@ const App: React.FC = () => {
               )}
 
               {gameState.phase === GamePhase.GUESSING && (
-                <div className="p-4 bg-slate-900/50 flex flex-col items-center justify-center min-h-[300px]">
-                  <p className="text-xl font-bold text-slate-400 mb-6 uppercase tracking-widest">Guessing Phase in Progress</p>
-                  <button
-                    onClick={() => setShowGuessingBoard(true)}
-                    className="px-8 py-3 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded-xl transition-all shadow-lg flex items-center gap-2"
-                  >
-                    <HelpCircle size={20} />
-                    OPEN GUESSING BOARD
-                  </button>
+                <div className="p-4 bg-slate-900/50 flex flex-col items-center justify-center min-h-[300px] gap-6">
+                  <div className="text-center">
+                    <p className="text-xl font-bold text-slate-400 mb-6 uppercase tracking-widest">Guessing Phase in Progress</p>
+                    <button
+                      onClick={() => setShowGuessingBoard(true)}
+                      className="px-8 py-3 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded-xl transition-all shadow-lg flex items-center gap-2 mx-auto"
+                    >
+                      <HelpCircle size={20} />
+                      OPEN GUESSING BOARD
+                    </button>
+                  </div>
+
+                  <div className="text-center">
+                    {!!gameState.winnerId && me?.isHost ? (
+                      <button
+                        onClick={nextRound}
+                        className="px-10 py-4 bg-blue-600 hover:bg-blue-500 text-white font-black text-xl rounded-2xl transition-all shadow-xl shadow-blue-600/20 border-b-4 border-blue-800 active:translate-y-1"
+                      >
+                        CLOSE & CONTINUE
+                      </button>
+                    ) : !!gameState.winnerId ? (
+                      <p className="text-slate-400 italic">Waiting for the host to restart the game</p>
+                    ) : (
+                      <p className="text-slate-400 italic">Waiting for the guesser to decide...</p>
+                    )}
+                  </div>
                 </div>
               )}
 
@@ -625,7 +642,6 @@ const App: React.FC = () => {
                   myId={userId}
                   word={gameState.currentWord || ''}
                   onClose={() => setShowGuessingBoard(false)}
-                  onNextRound={nextRound}
                   onCorrect={() => handleGuess(true)}
                   onIncorrect={() => handleGuess(false)}
                   isGameOver={!!gameState.winnerId}

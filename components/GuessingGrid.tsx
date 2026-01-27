@@ -8,7 +8,6 @@ interface GuessingGridProps {
   currentRevealIndex: number; // Order index currently being shown
   isGuesser: boolean;
   onClose: () => void;
-  onNextRound: () => void;
   onCorrect: () => void;
   onIncorrect: () => void;
   isGameOver: boolean;
@@ -21,7 +20,6 @@ const GuessingGrid: React.FC<GuessingGridProps> = ({
   currentRevealIndex,
   isGuesser,
   onClose,
-  onNextRound,
   onCorrect,
   onIncorrect,
   isGameOver,
@@ -113,7 +111,7 @@ const GuessingGrid: React.FC<GuessingGridProps> = ({
 
         {/* Footer Controls */}
         <div className="p-6 border-t border-slate-800 bg-slate-900/80 backdrop-blur-sm">
-          {isGuesser && !isGameOver ? (
+          {isGuesser && !isGameOver && (
             <div className="flex flex-col items-center gap-4">
               <p className="text-yellow-400 font-bold animate-pulse text-lg">Are you ready to guess?</p>
               <div className="flex gap-4 w-full max-w-md">
@@ -130,21 +128,6 @@ const GuessingGrid: React.FC<GuessingGridProps> = ({
                   CORRECT!
                 </button>
               </div>
-            </div>
-          ) : (
-            <div className="text-center">
-              {isGameOver && players.find(p => p.id === myId)?.isHost ? (
-                <button
-                  onClick={onNextRound}
-                  className="px-8 py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl transition-all shadow-lg"
-                >
-                  Close & Continue
-                </button>
-              ) : isGameOver ? (
-                <p className="text-slate-400 italic">Waiting for the host to restart the game</p>
-              ) : (
-                <p className="text-slate-400 italic">Waiting for the guesser to decide...</p>
-              )}
             </div>
           )}
         </div>

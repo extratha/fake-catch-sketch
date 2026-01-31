@@ -38,6 +38,8 @@ const GuessingGrid: React.FC<GuessingGridProps> = ({
       return 0;
     });
 
+  const guesser = players.find(p => p.isGuesser);
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/90 backdrop-blur-md p-4 sm:p-8">
       <div className="relative w-full max-w-6xl h-full flex flex-col bg-slate-900 rounded-2xl border border-slate-700 shadow-2xl overflow-hidden">
@@ -47,7 +49,7 @@ const GuessingGrid: React.FC<GuessingGridProps> = ({
           <div>
             <h2 className="text-2xl font-bold text-white flex items-center gap-2">
               <HelpCircle className="text-purple-400" />
-              Guessing Time!
+              Guessing Time!  {guesser ? ` The Guesser is ${guesser.name}` : ''}
             </h2>
             <p className="text-slate-400 text-sm">
               {isGameOver

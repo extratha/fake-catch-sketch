@@ -63,7 +63,7 @@ io.on('connection', (socket) => {
         if (!rooms.has(roomId)) {
             rooms.set(roomId, {
                 roomId,
-                phase: 'LOBBY' as any, // Cast to any or import GamePhase
+                phase: 'LOBBY' as any,
                 players: [],
                 currentWord: null,
                 guesserId: null,
@@ -77,20 +77,26 @@ io.on('connection', (socket) => {
         const state = rooms.get(roomId);
         if (!state) return;
 
-        // remove player that has undefined id 
+        // Clean up invalid players
         state.players = state.players.filter(p => p.id !== undefined);
 
-        if (!state.players.find(p => p.id === playerId)) {
+        const existingPlayer = state.players.find(p => p.id === playerId);
+        if (existingPlayer) {
+            existingPlayer.socketId = socket.id;
+            existingPlayer.isConnected = true;
+            existingPlayer.name = playerName; // Update name in case it changed
+        } else {
             state.players.push({
-                id: playerId, // We'll use playerId for display but we need socket.id for disconnect
+                id: playerId,
                 name: playerName,
                 score: 0,
-                isHost: state.players.length === 0, // First one is host
+                isHost: state.players.length === 0,
                 isGuesser: state.guesserId === playerId,
                 hasFinishedDrawing: false,
                 drawingOrder: 0,
                 drawingData: null,
-                socketId: socket.id // Add this to Player type
+                socketId: socket.id,
+                isConnected: true
             });
         }
 
@@ -119,19 +125,26 @@ io.on('connection', (socket) => {
             if (roomId !== socket.id) {
                 const state = rooms.get(roomId);
                 if (state) {
-                    const originalCount = state.players.length;
-                    state.players = state.players.filter(p => p.socketId !== socket.id);
+                    const player = state.players.find(p => p.socketId === socket.id);
+                    if (player) {
+                        player.isConnected = false;
 
-                    if (state.players.length !== originalCount) {
-                        // Host migration if host left
-                        if (state.players.length > 0 && !state.players.find(p => p.isHost)) {
-                            state.players[0].isHost = true;
+                        // If host disconnected, migrate host to someone who is connected
+                        if (player.isHost) {
+                            const nextHost = state.players.find(p => p.isConnected && p.id !== player.id);
+                            if (nextHost) {
+                                player.isHost = false;
+                                nextHost.isHost = true;
+                            }
                         }
+
                         broadcastRoomState(roomId);
                     }
 
-                    // If room is empty, consider deleting it
-                    if (state.players.length === 0) {
+                    // If room is empty (everyone disconnected), consider deleting it
+                    const anyConnected = state.players.some(p => p.isConnected);
+                    if (!anyConnected) {
+                        // Optional: Set a timeout to delete room after some time if no one reconnects
                         rooms.delete(roomId);
                     }
                 }

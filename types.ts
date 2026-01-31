@@ -16,6 +16,7 @@ export interface Player {
   drawingOrder: number; // 0 means not finished
   drawingData: string | null; // base64 image data
   socketId?: string; // Socket.io ID for disconnection tracking
+  isConnected: boolean;
 }
 
 export interface GameState {

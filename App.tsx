@@ -79,7 +79,8 @@ const App: React.FC = () => {
           isGuesser: false,
           hasFinishedDrawing: false,
           drawingOrder: 0,
-          drawingData: null
+          drawingData: null,
+          isConnected: true
         }]
     }));
 

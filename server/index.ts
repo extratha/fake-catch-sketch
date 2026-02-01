@@ -154,6 +154,34 @@ io.on('connection', (socket) => {
 
     socket.on('disconnect', () => {
     });
+
+    socket.on('leave-room', ({ roomId, playerId }: { roomId: string, playerId: string }) => {
+        socket.leave(roomId);
+        const state = rooms.get(roomId);
+        if (state) {
+            const player = state.players.find(p => p.id === playerId);
+            if (player) {
+                player.isConnected = false;
+
+                // If host temporarily leaves, migrate host to someone who is connected
+                if (player.isHost) {
+                    const nextHost = state.players.find(p => p.isConnected && p.id !== player.id);
+                    if (nextHost) {
+                        player.isHost = false;
+                        nextHost.isHost = true;
+                    }
+                }
+
+                broadcastRoomState(roomId);
+            }
+
+            // If room is empty (everyone disconnected), consider deleting it
+            const anyConnected = state.players.some(p => p.isConnected);
+            if (!anyConnected) {
+                rooms.delete(roomId);
+            }
+        }
+    });
 });
 
 // SPA Routing: Handle all other requests by serving index.html

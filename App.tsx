@@ -110,8 +110,8 @@ const App: React.FC = () => {
       const hash = window.location.hash.replace('#/rooms/', '');
       setRoomPath(hash);
 
-      // Auto-join if hash changes and we have a name
-      if (hash && userName) {
+      // Auto-join if hash changes and we have a name, but only if we aren't already in that room
+      if (hash && userName && gameState.roomId !== hash) {
         joinRoom(hash, userName);
       }
     };
@@ -320,15 +320,16 @@ const App: React.FC = () => {
   };
 
   const leaveRoom = () => {
-    const players = gameState.players.filter(p => p.id !== userId);
-    // Host migration
-    if (players.length > 0 && gameState.players.find(p => p.id === userId)?.isHost) {
-      players[0].isHost = true;
+    // Notify server we are leaving (so it marks us as disconnected but keeps score)
+    if (gameState.roomId) {
+      socket.emit('leave-room', { roomId: gameState.roomId, playerId: userId });
     }
-    syncState({ ...gameState, players });
+
+    // Reset local view only
     setRoomPath('');
     window.location.hash = '';
   };
+
 
   // UI Components
   if (!roomPath) {

@@ -118,11 +118,13 @@ const App: React.FC = () => {
 
     window.addEventListener('hashchange', handleHash);
 
-    // Drawing Auto-Lock Logic
     const finishedCount = gameState.players.filter(p => !p.isGuesser && p.hasFinishedDrawing).length;
     const isHost = gameState.players.find(p => p.id === userId)?.isHost;
 
-    if (gameState.phase === GamePhase.DRAWING && finishedCount > 1 && !gameState.isBoardLocked && isHost) {
+    const activePlayers = gameState.players.filter(p => p.isConnected);
+    const finishedCountDeadLine = activePlayers.length <= 3 ? 0 : 1;
+
+    if (gameState.phase === GamePhase.DRAWING && finishedCount > finishedCountDeadLine && !gameState.isBoardLocked && isHost) {
       const timer = setTimeout(() => {
         syncState({
           ...gameState,
@@ -249,7 +251,7 @@ const App: React.FC = () => {
     players[myIdx].drawingData = currentDrawing;
 
     // Check if everyone except guesser is done
-    const totalDrawers = players.filter(p => !p.isGuesser).length;
+    const totalDrawers = players.filter(p => !p.isGuesser && p.isConnected).length;
     const everyoneDone = players.filter(p => p.hasFinishedDrawing).length >= totalDrawers;
 
     syncState({

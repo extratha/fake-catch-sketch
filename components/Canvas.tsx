@@ -1,6 +1,6 @@
 
 import { Player } from '@/types';
-import React, { useRef, useEffect, useState, useCallback } from 'react';
+import React, { useRef, useEffect, useCallback } from 'react';
 
 interface CanvasProps {
   onSave: (dataUrl: string) => void;
@@ -13,7 +13,6 @@ interface CanvasProps {
 
 const Canvas: React.FC<CanvasProps> = ({ onSave, me, disabled, color = "#f8fafc", lineWidth = 3, isBoardLocked = false }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [isDrawing, setIsDrawing] = useState(false);
   const isDrawingRef = useRef(false);
   const lastPos = useRef({ x: 0, y: 0 });
 
@@ -48,7 +47,6 @@ const Canvas: React.FC<CanvasProps> = ({ onSave, me, disabled, color = "#f8fafc"
   const startDrawing = (e: React.MouseEvent | React.TouchEvent) => {
     if (disabled) return;
     isDrawingRef.current = true;
-    setIsDrawing(true);
     lastPos.current = getPos(e);
   };
 
@@ -77,7 +75,6 @@ const Canvas: React.FC<CanvasProps> = ({ onSave, me, disabled, color = "#f8fafc"
   const stopDrawing = () => {
     if (isDrawingRef.current) {
       isDrawingRef.current = false;
-      setIsDrawing(false);
       const canvas = canvasRef.current;
       if (canvas) {
         onSave(canvas.toDataURL());
@@ -107,8 +104,9 @@ const Canvas: React.FC<CanvasProps> = ({ onSave, me, disabled, color = "#f8fafc"
         height={600}
         style={{
           cursor: disabled ? 'default' : pencilCursor,
-          // Lock touch gestures only while the player is actively holding the canvas.
-          touchAction: disabled || !isDrawing ? 'auto' : 'none'
+          // The browser decides scroll vs draw at touch start, so the canvas must
+          // opt out of touch scrolling before the player starts dragging.
+          touchAction: disabled ? 'auto' : 'none'
         }}
         className={`w-full h-full ${disabled ? 'opacity-80' : ''}`}
         onMouseDown={startDrawing}

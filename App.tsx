@@ -240,24 +240,18 @@ const App: React.FC = () => {
   };
 
   const finishDrawing = () => {
-    const players = [...gameState.players];
-    const finishedCount = players.filter(p => p.hasFinishedDrawing).length;
-    const myIdx = players.findIndex(p => p.id === userId);
-
+    const myIdx = gameState.players.findIndex(p => p.id === userId);
     if (myIdx === -1) return;
 
+    // Optimistically update local state for immediate UI feedback
+    const players = [...gameState.players];
     players[myIdx].hasFinishedDrawing = true;
-    players[myIdx].drawingOrder = finishedCount + 1;
-    players[myIdx].drawingData = currentDrawing;
+    setGameState(prev => ({ ...prev, players }));
 
-    // Check if everyone except guesser is done
-    const totalDrawers = players.filter(p => !p.isGuesser && p.isConnected).length;
-    const everyoneDone = players.filter(p => p.hasFinishedDrawing).length >= totalDrawers;
-
-    syncState({
-      ...gameState,
-      phase: everyoneDone ? GamePhase.GUESSING : GamePhase.DRAWING,
-      players
+    socket.emit('player-finish-drawing', {
+      roomId: gameState.roomId,
+      playerId: userId,
+      drawingData: currentDrawing
     });
   };
 

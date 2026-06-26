@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { WORD_LIST, MAX_STARS } from './constants';
 import { GamePhase, GameState } from './types';
 import { io } from 'socket.io-client';
@@ -47,6 +47,9 @@ const App: React.FC = () => {
   const [activeRooms, setActiveRooms] = useState<{ id: string, playerCount: number, phase: string }[]>([]);
   const [showGuessingBoard, setShowGuessingBoard] = useState(false);
 
+  // Ref to always hold the latest gameState — used inside timers/callbacks to avoid stale closures
+  const gameStateRef = useRef<GameState>(gameState);
+
   // Socket setup
   const socket = useMemo(() => {
     const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
@@ -54,8 +57,14 @@ const App: React.FC = () => {
     return io(socketUrl, { autoConnect: true });
   }, []);
 
+  // Keep ref in sync whenever gameState changes
+  useEffect(() => {
+    gameStateRef.current = gameState;
+  }, [gameState]);
+
   // Sync logic
   const syncState = useCallback((newState: GameState) => {
+    gameStateRef.current = newState;
     setGameState(newState);
     if (newState.roomId) {
       socket.emit('game-state-update', { roomId: newState.roomId, state: newState });
@@ -90,10 +99,12 @@ const App: React.FC = () => {
   }, [socket, userId]);
 
   useEffect(() => {
+    // Use ref so this callback always sees latest state without stale closure
     const onGameStateUpdate = (receivedState: GameState) => {
-      if (receivedState.phase === GamePhase.GUESSING && gameState.phase !== GamePhase.GUESSING) {
+      if (receivedState.phase === GamePhase.GUESSING && gameStateRef.current.phase !== GamePhase.GUESSING) {
         setShowGuessingBoard(true);
       }
+      gameStateRef.current = receivedState;
       setGameState(receivedState);
     };
 
@@ -118,16 +129,24 @@ const App: React.FC = () => {
 
     window.addEventListener('hashchange', handleHash);
 
+    const totalDrawers = gameState.players.filter(p => !p.isGuesser && p.isConnected).length;
     const finishedCount = gameState.players.filter(p => !p.isGuesser && p.hasFinishedDrawing).length;
     const isHost = gameState.players.find(p => p.id === userId)?.isHost;
 
     const activePlayers = gameState.players.filter(p => p.isConnected);
     const finishedCountDeadLine = activePlayers.length <= 3 ? 0 : 1;
 
-    if (gameState.phase === GamePhase.DRAWING && finishedCount > finishedCountDeadLine && !gameState.isBoardLocked && isHost) {
+    // Only lock the board if we're still in DRAWING and NOT everyone has finished yet
+    // (when everyone finishes, the server transitions to GUESSING on its own)
+    if (gameState.phase === GamePhase.DRAWING && finishedCount > finishedCountDeadLine && finishedCount < totalDrawers && !gameState.isBoardLocked && isHost) {
       const timer = setTimeout(() => {
+        // Re-read the LATEST state from ref at the moment the timer fires.
+        // This prevents a stale closure from overwriting a GUESSING state that
+        // arrived from the server in the 400ms window.
+        const latest = gameStateRef.current;
+        if (latest.phase !== GamePhase.DRAWING || latest.isBoardLocked) return;
         syncState({
-          ...gameState,
+          ...latest,
           isBoardLocked: true
         });
       }, 400);
@@ -444,6 +463,7 @@ const App: React.FC = () => {
             <p className="text-xs text-slate-500 uppercase font-bold tracking-widest flex items-center gap-1">
               <Users size={12} /> {gameState.players.length} Players
             </p>
+            <p>Phase : {gameState.phase}</p>
           </div>
         </div>
 

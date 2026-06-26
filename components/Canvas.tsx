@@ -14,6 +14,7 @@ interface CanvasProps {
 const Canvas: React.FC<CanvasProps> = ({ onSave, me, disabled, color = "#f8fafc", lineWidth = 3, isBoardLocked = false }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isDrawing, setIsDrawing] = useState(false);
+  const isDrawingRef = useRef(false);
   const lastPos = useRef({ x: 0, y: 0 });
 
   useEffect(() => {
@@ -46,13 +47,13 @@ const Canvas: React.FC<CanvasProps> = ({ onSave, me, disabled, color = "#f8fafc"
 
   const startDrawing = (e: React.MouseEvent | React.TouchEvent) => {
     if (disabled) return;
-    if ('touches' in e && e.cancelable) e.preventDefault();
+    isDrawingRef.current = true;
     setIsDrawing(true);
     lastPos.current = getPos(e);
   };
 
   const draw = useCallback((e: React.MouseEvent | React.TouchEvent) => {
-    if (!isDrawing || disabled) return;
+    if (!isDrawingRef.current || disabled) return;
     if ('touches' in e && e.cancelable) e.preventDefault();
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -71,14 +72,16 @@ const Canvas: React.FC<CanvasProps> = ({ onSave, me, disabled, color = "#f8fafc"
     ctx.stroke();
 
     lastPos.current = currentPos;
-  }, [isDrawing, disabled, color, lineWidth]);
+  }, [disabled, color, lineWidth]);
 
   const stopDrawing = () => {
-    if (isDrawing) {
+    if (isDrawingRef.current) {
+      isDrawingRef.current = false;
       setIsDrawing(false);
       const canvas = canvasRef.current;
       if (canvas) {
         onSave(canvas.toDataURL());
+        canvas.blur();
       }
     }
   };
@@ -104,9 +107,8 @@ const Canvas: React.FC<CanvasProps> = ({ onSave, me, disabled, color = "#f8fafc"
         height={600}
         style={{
           cursor: disabled ? 'default' : pencilCursor,
-          // 'none' ต้องใช้ตอนวาดเท่านั้น เพื่อป้องกัน browser scroll/zoom ขณะลาก
-          // เมื่อ disabled แล้ว ให้ touch events ไหลผ่านได้ตามปกติ
-          touchAction: disabled ? 'auto' : 'none'
+          // Lock touch gestures only while the player is actively holding the canvas.
+          touchAction: disabled || !isDrawing ? 'auto' : 'none'
         }}
         className={`w-full h-full ${disabled ? 'opacity-80' : ''}`}
         onMouseDown={startDrawing}
@@ -116,6 +118,7 @@ const Canvas: React.FC<CanvasProps> = ({ onSave, me, disabled, color = "#f8fafc"
         onTouchStart={startDrawing}
         onTouchMove={draw}
         onTouchEnd={stopDrawing}
+        onTouchCancel={stopDrawing}
       />
       {!disabled && (
         <button

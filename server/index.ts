@@ -115,6 +115,29 @@ io.on('connection', (socket) => {
         });
     });
 
+    socket.on('player-finish-drawing', ({ roomId, playerId, drawingData }: { roomId: string, playerId: string, drawingData: any }) => {
+        const state = rooms.get(roomId);
+        if (!state) return;
+
+        const player = state.players.find(p => p.id === playerId);
+        if (player && !player.hasFinishedDrawing) {
+            const finishedCount = state.players.filter(p => p.hasFinishedDrawing).length;
+            
+            player.hasFinishedDrawing = true;
+            player.drawingOrder = finishedCount + 1;
+            player.drawingData = drawingData;
+
+            const totalDrawers = state.players.filter(p => !p.isGuesser && p.isConnected).length;
+            const everyoneDone = state.players.filter(p => p.hasFinishedDrawing).length >= totalDrawers;
+
+            if (everyoneDone) {
+                state.phase = 'GUESSING' as any;
+            }
+
+            broadcastRoomState(roomId);
+        }
+    });
+
     socket.on('game-state-update', ({ roomId, state }: { roomId: string, state: GameState }) => {
         rooms.set(roomId, state);
         broadcastRoomState(roomId);

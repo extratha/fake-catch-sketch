@@ -104,7 +104,9 @@ const Canvas: React.FC<CanvasProps> = ({ onSave, me, disabled, color = "#f8fafc"
         height={600}
         style={{
           cursor: disabled ? 'default' : pencilCursor,
-          touchAction: 'none'
+          // 'none' ต้องใช้ตอนวาดเท่านั้น เพื่อป้องกัน browser scroll/zoom ขณะลาก
+          // เมื่อ disabled แล้ว ให้ touch events ไหลผ่านได้ตามปกติ
+          touchAction: disabled ? 'auto' : 'none'
         }}
         className={`w-full h-full ${disabled ? 'opacity-80' : ''}`}
         onMouseDown={startDrawing}

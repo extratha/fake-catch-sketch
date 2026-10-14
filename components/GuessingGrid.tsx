@@ -2,6 +2,7 @@
 import React, { useState } from 'react';
 import { X, CheckCircle, HelpCircle, Pencil } from 'lucide-react';
 import { Player } from '../types';
+import { revealSequence, pointsForReveal } from '../game/reducer';
 
 interface GuessingGridProps {
   players: Player[];
@@ -11,8 +12,12 @@ interface GuessingGridProps {
   onCorrect: () => void;
   onIncorrect: () => void;
   isGameOver: boolean;
+  winnerId: string | null; // guesser's id when guessed correctly, 'NONE' when nobody got it
+  isHost: boolean;
+  onNextRound: () => void;
   word: string;
   myId: string;
+  drawings: Record<string, string>; // playerId -> object URL
 }
 
 const GuessingGrid: React.FC<GuessingGridProps> = ({
@@ -23,22 +28,22 @@ const GuessingGrid: React.FC<GuessingGridProps> = ({
   onCorrect,
   onIncorrect,
   isGameOver,
+  winnerId,
+  isHost,
+  onNextRound,
   word,
-  myId
+  myId,
+  drawings
 }) => {
   const [fullscreenImage, setFullscreenImage] = useState<string | null>(null);
 
-  // Filter out the guesser and sort: Finished first (by order), then unfinished
-  const drawers = players
-    .filter(p => !p.isGuesser)
-    .sort((a, b) => {
-      if (a.hasFinishedDrawing && b.hasFinishedDrawing) return a.drawingOrder - b.drawingOrder;
-      if (a.hasFinishedDrawing) return -1;
-      if (b.hasFinishedDrawing) return 1;
-      return 0;
-    });
+  // Same order the server uses to award points
+  const drawers = revealSequence(players);
 
   const guesser = players.find(p => p.isGuesser);
+  const host = players.find(p => p.isHost);
+  const guessedCorrectly = isGameOver && winnerId !== 'NONE';
+  const winningDrawer = guessedCorrectly ? drawers[currentRevealIndex] : undefined;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/90 backdrop-blur-md p-4 sm:p-8">
@@ -73,17 +78,22 @@ const GuessingGrid: React.FC<GuessingGridProps> = ({
                   className={`group relative aspect-[4/3] rounded-xl overflow-hidden border-2 transition-all duration-500 ${isRevealed
                     ? 'border-blue-500/50 shadow-lg shadow-blue-500/10 scale-100'
                     : 'border-slate-800 bg-slate-800 grayscale scale-95 opacity-50'
-                    } ${isCurrent ? 'ring-4 ring-yellow-400 ring-offset-4 ring-offset-slate-900' : ''}`}
+                    } ${isCurrent ? 'ring-4 ring-yellow-400 ring-offset-4 ring-offset-slate-900' : ''} ${player.id === winningDrawer?.id ? 'ring-4 ring-green-400 ring-offset-4 ring-offset-slate-900' : ''}`}
                 >
                   {isRevealed ? (
                     <>
-                      {player.drawingData ? (
+                      {drawings[player.id] ? (
                         <img
-                          src={player.drawingData}
+                          src={drawings[player.id]}
                           alt={`Drawing by ${player.name}`}
                           className="w-full h-full object-cover cursor-zoom-in"
-                          onClick={() => setFullscreenImage(player.drawingData)}
+                          onClick={() => setFullscreenImage(drawings[player.id])}
                         />
+                      ) : player.hasFinishedDrawing && player.isConnected ? (
+                        <div className="w-full h-full flex flex-col items-center justify-center bg-slate-800 text-slate-400">
+                          <Pencil size={40} className="mb-2 opacity-40 animate-pulse" />
+                          <p className="text-xs font-black uppercase tracking-tighter">Uploading...</p>
+                        </div>
                       ) : (
                         <div className="w-full h-full flex flex-col items-center justify-center bg-slate-800 text-slate-500">
                           <Pencil size={40} className="mb-2 opacity-20" />
@@ -130,6 +140,37 @@ const GuessingGrid: React.FC<GuessingGridProps> = ({
                   CORRECT!
                 </button>
               </div>
+            </div>
+          )}
+          {!isGuesser && !isGameOver && (
+            <p className="text-center text-slate-400 font-bold animate-pulse">
+              Waiting for <span className="text-white">{guesser?.name}</span> to guess...
+            </p>
+          )}
+          {isGameOver && (
+            <div className="flex flex-col items-center gap-4 text-center">
+              {guessedCorrectly ? (
+                <p className="text-lg font-bold text-green-400">
+                  {guesser?.name} guessed <span className="text-white">"{word}"</span> from {winningDrawer?.name}'s drawing!
+                  <span className="block text-yellow-400">+{pointsForReveal(currentRevealIndex)} stars each</span>
+                </p>
+              ) : (
+                <p className="text-lg font-bold text-slate-300">
+                  Nobody got it! The word was <span className="text-white">"{word}"</span>
+                </p>
+              )}
+              {isHost ? (
+                <button
+                  onClick={onNextRound}
+                  className="w-full max-w-md py-4 bg-blue-600 hover:bg-blue-500 text-white font-black text-xl rounded-xl transition-all active:scale-95 shadow-lg shadow-blue-600/20 border-b-4 border-blue-800"
+                >
+                  NEXT ROUND
+                </button>
+              ) : (
+                <p className="text-slate-400 font-bold animate-pulse">
+                  Waiting for <span className="text-white">{host?.name}</span> to start the next round...
+                </p>
+              )}
             </div>
           )}
         </div>

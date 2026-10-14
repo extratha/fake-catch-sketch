@@ -1,13 +1,14 @@
 
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { WORD_LIST, MAX_STARS } from './constants';
+import { MAX_STARS } from './constants';
+import type { ClientIntent } from './game/reducer';
 import { GamePhase, GameState } from './types';
 import { io } from 'socket.io-client';
 import ScoreStars from './components/ScoreStars';
 import PlayerBoard from './components/PlayerBoard';
-import Canvas from './components/Canvas';
+import Canvas, { CanvasHandle } from './components/Canvas';
 import GuessingGrid from './components/GuessingGrid';
-import { Pencil, Trophy, Send, Users, LogOut, Info, RotateCcw, HelpCircle } from 'lucide-react';
+import { Pencil, Trophy, Send, Users, LogOut, Info, RotateCcw, SkipForward } from 'lucide-react';
 
 // Utils
 const generateId = () => Math.random().toString(36).substring(2, 7);
@@ -39,36 +40,34 @@ const App: React.FC = () => {
     winnerId: null,
     revealOrder: 0,
     selectableWords: null,
-    isBoardLocked: false
+    isBoardLocked: false,
+    round: 0,
+    notice: null
   });
 
-  const [currentDrawing, setCurrentDrawing] = useState<string | null>(null);
+  // Drawings arrive as binary over a separate event and are shown via object URLs, keyed by round
+  const [drawings, setDrawings] = useState<{ round: number, urls: Record<string, string> }>({ round: 0, urls: {} });
+  // Round in which this player pressed "done" — lets the UI react before the server confirms
+  const [pressedRound, setPressedRound] = useState<number | null>(null);
+  const canvasRef = useRef<CanvasHandle>(null);
   const [randomWords, setRandomWords] = useState<string[]>([]);
   const [activeRooms, setActiveRooms] = useState<{ id: string, playerCount: number, phase: string }[]>([]);
   const [showGuessingBoard, setShowGuessingBoard] = useState(false);
 
-  // Ref to always hold the latest gameState — used inside timers/callbacks to avoid stale closures
+  // Ref to always hold the latest gameState — used inside socket/hash callbacks to avoid stale closures
   const gameStateRef = useRef<GameState>(gameState);
 
   // Socket setup
   const socket = useMemo(() => {
     const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
     const socketUrl = (import.meta as any).env.VITE_SOCKET_URL || (isLocal ? 'http://localhost:3001' : window.location.origin);
-    return io(socketUrl, { autoConnect: true });
+    // WebSocket only: avoids the initial long-polling phase and its extra latency
+    return io(socketUrl, { autoConnect: true, transports: ['websocket'] });
   }, []);
 
-  // Keep ref in sync whenever gameState changes
-  useEffect(() => {
-    gameStateRef.current = gameState;
-  }, [gameState]);
-
-  // Sync logic
-  const syncState = useCallback((newState: GameState) => {
-    gameStateRef.current = newState;
-    setGameState(newState);
-    if (newState.roomId) {
-      socket.emit('game-state-update', { roomId: newState.roomId, state: newState });
-    }
+  // The server owns the game state: clients only send intents and render what comes back
+  const sendAction = useCallback((intent: ClientIntent) => {
+    socket.emit('game-action', intent);
   }, [socket]);
 
   const joinRoom = useCallback((rId: string, name: string) => {
@@ -88,7 +87,7 @@ const App: React.FC = () => {
           isGuesser: false,
           hasFinishedDrawing: false,
           drawingOrder: 0,
-          drawingData: null,
+          finishedAt: null,
           isConnected: true
         }]
     }));
@@ -98,8 +97,13 @@ const App: React.FC = () => {
     socket.emit('join-room', { roomId: rId, playerName: name, playerId: userId });
   }, [socket, userId]);
 
+  const uploadDrawing = useCallback(async (round: number) => {
+    const blob = await canvasRef.current?.toBlob();
+    if (!blob) return;
+    socket.emit('submit-drawing', { round, image: await blob.arrayBuffer(), mime: blob.type });
+  }, [socket]);
+
   useEffect(() => {
-    // Use ref so this callback always sees latest state without stale closure
     const onGameStateUpdate = (receivedState: GameState) => {
       if (receivedState.phase === GamePhase.GUESSING && gameStateRef.current.phase !== GamePhase.GUESSING) {
         setShowGuessingBoard(true);
@@ -107,14 +111,57 @@ const App: React.FC = () => {
       gameStateRef.current = receivedState;
       setGameState(receivedState);
     };
+    const onRoomListUpdate = (rooms: { id: string, playerCount: number, phase: string }[]) => setActiveRooms(rooms);
+    const onActionError = ({ message }: { message: string }) => console.warn('Action rejected by server:', message);
+    // Answer immediately so the server can measure round-trip time for latency compensation
+    const onLatencyPing = (ack: () => void) => ack();
+    const onDrawing = ({ round, playerId, image, mime }: { round: number, playerId: string, image: ArrayBuffer, mime: string }) => {
+      const url = URL.createObjectURL(new Blob([image], { type: mime }));
+      setDrawings(prev => {
+        if (round < prev.round || prev.urls[playerId]) {
+          URL.revokeObjectURL(url);
+          return prev;
+        }
+        if (round > prev.round) {
+          Object.values(prev.urls).forEach(URL.revokeObjectURL);
+          return { round, urls: { [playerId]: url } };
+        }
+        return { round, urls: { ...prev.urls, [playerId]: url } };
+      });
+    };
 
     socket.on('game-state-update', onGameStateUpdate);
-    socket.on('room-list-update', (rooms: any) => setActiveRooms(rooms));
+    socket.on('room-list-update', onRoomListUpdate);
+    socket.on('action-error', onActionError);
+    socket.on('latency-ping', onLatencyPing);
+    socket.on('drawing', onDrawing);
+    // The host forced this player to finish: send whatever is on the canvas
+    const onRequestDrawing = ({ round }: { round: number }) => {
+      setPressedRound(round);
+      uploadDrawing(round);
+    };
+    socket.on('request-drawing', onRequestDrawing);
 
+    return () => {
+      socket.off('game-state-update', onGameStateUpdate);
+      socket.off('room-list-update', onRoomListUpdate);
+      socket.off('action-error', onActionError);
+      socket.off('latency-ping', onLatencyPing);
+      socket.off('drawing', onDrawing);
+      socket.off('request-drawing', onRequestDrawing);
+    };
+  }, [socket, uploadDrawing]);
+
+  useEffect(() => {
     // Initial join check if we have a name and room
-    if (userName && roomPath && gameState.roomId !== roomPath) {
+    if (userName && roomPath && gameStateRef.current.roomId !== roomPath) {
       joinRoom(roomPath, userName);
     }
+
+    // The server identifies players by socket, so re-join after every reconnect
+    const handleReconnect = () => {
+      if (userName && roomPath) joinRoom(roomPath, userName);
+    };
 
     // Handle hash changes for navigation
     const handleHash = () => {
@@ -122,53 +169,29 @@ const App: React.FC = () => {
       setRoomPath(hash);
 
       // Auto-join if hash changes and we have a name, but only if we aren't already in that room
-      if (hash && userName && gameState.roomId !== hash) {
+      if (hash && userName && gameStateRef.current.roomId !== hash) {
         joinRoom(hash, userName);
       }
     };
 
+    socket.on('connect', handleReconnect);
     window.addEventListener('hashchange', handleHash);
-
-    const totalDrawers = gameState.players.filter(p => !p.isGuesser && p.isConnected).length;
-    const finishedCount = gameState.players.filter(p => !p.isGuesser && p.hasFinishedDrawing).length;
-    const isHost = gameState.players.find(p => p.id === userId)?.isHost;
-
-    const activePlayers = gameState.players.filter(p => p.isConnected);
-    const finishedCountDeadLine = activePlayers.length <= 3 ? 0 : 1;
-
-    // Only lock the board if we're still in DRAWING and NOT everyone has finished yet
-    // (when everyone finishes, the server transitions to GUESSING on its own)
-    if (gameState.phase === GamePhase.DRAWING && finishedCount > finishedCountDeadLine && finishedCount < totalDrawers && !gameState.isBoardLocked && isHost) {
-      const timer = setTimeout(() => {
-        // Re-read the LATEST state from ref at the moment the timer fires.
-        // This prevents a stale closure from overwriting a GUESSING state that
-        // arrived from the server in the 400ms window.
-        const latest = gameStateRef.current;
-        if (latest.phase !== GamePhase.DRAWING || latest.isBoardLocked) return;
-        syncState({
-          ...latest,
-          isBoardLocked: true
-        });
-      }, 400);
-      return () => {
-        clearTimeout(timer);
-        socket.off('game-state-update', onGameStateUpdate);
-        window.removeEventListener('hashchange', handleHash);
-      };
-    }
-
     return () => {
-      socket.off('game-state-update', onGameStateUpdate);
+      socket.off('connect', handleReconnect);
       window.removeEventListener('hashchange', handleHash);
     };
-  }, [socket, userName, roomPath, joinRoom, gameState, userId, syncState]);
+  }, [socket, userName, roomPath, joinRoom]);
+
+  // Drop drawings from previous rounds
+  useEffect(() => {
+    setDrawings(prev => {
+      if (prev.round >= gameState.round) return prev;
+      Object.values(prev.urls).forEach(URL.revokeObjectURL);
+      return { round: gameState.round, urls: {} };
+    });
+  }, [gameState.round]);
 
   // Actions
-  useEffect(() => {
-    if (gameState.phase === GamePhase.PICKING || gameState.phase === GamePhase.LOBBY) {
-      setCurrentDrawing(null);
-    }
-  }, [gameState.phase]);
 
   const handleSetName = (name: string) => {
     const trimmed = name.trim();
@@ -185,148 +208,38 @@ const App: React.FC = () => {
 
   const createRoom = () => {
     if (!userName) return setShowNameModal(true);
-    const newRoomId = generateId();
-
-    setRoomPath(newRoomId);
-    window.location.hash = `#/rooms/${newRoomId}`;
-    socket.emit('join-room', { roomId: newRoomId, playerName: userName });
+    joinRoom(generateId(), userName);
   };
 
   const startGame = () => {
-    setCurrentDrawing(null);
-    const players = [...gameState.players].sort((a, b) => a.id.localeCompare(b.id)); // Sort for stability
-    // Pick guesser - if it's the first time, pick host, otherwise pick next
-    let guesserIdx = players.findIndex(p => p.id === gameState.guesserId);
-    guesserIdx = (guesserIdx + 1) % players.length;
-
-    const updatedPlayers = players.map((p, idx) => ({
-      ...p,
-      isGuesser: idx === guesserIdx,
-      hasFinishedDrawing: false,
-      drawingOrder: 0,
-      drawingData: null
-    }));
-
-    // Generate random words
-    const picked: string[] = [];
-    while (picked.length < 3) {
-      const w = WORD_LIST[Math.floor(Math.random() * WORD_LIST.length)];
-      if (!picked.includes(w)) picked.push(w);
-    }
-
-    syncState({
-      ...gameState,
-      phase: GamePhase.PICKING,
-      players: updatedPlayers,
-      guesserId: updatedPlayers[guesserIdx].id,
-      currentWord: null,
-      winnerId: null, // Reset winner for the new round
-      revealOrder: 0,
-      selectableWords: picked,
-      isBoardLocked: false
-    });
+    sendAction({ type: 'START_ROUND' });
   };
 
-  const selectWord = (word: string) => {
-    syncState({
-      ...gameState,
-      phase: GamePhase.DRAWING,
-      currentWord: word,
-      selectableWords: null // Clear words after picking
-    });
+  const selectWord = (index: number) => sendAction({ type: 'SELECT_WORD', index });
+
+  const rerollWord = () => sendAction({ type: 'REROLL_WORD' });
+
+  // Fired on pointerdown (not click) so the press is timed when the finger/button goes down.
+  // The tiny "done" message goes out first; the drawing is encoded and uploaded afterwards
+  // so image size and network upload speed never affect who pressed first.
+  const finishDrawing = async (e: React.PointerEvent | React.MouseEvent) => {
+    const round = gameState.round;
+    if (pressedRound === round) return;
+    setPressedRound(round);
+
+    sendAction({ type: 'FINISH_DRAWING', inputDelayMs: performance.now() - e.timeStamp });
+    uploadDrawing(round);
   };
 
-  const rerollWord = () => {
-    let newWord = WORD_LIST[Math.floor(Math.random() * WORD_LIST.length)];
-    while (newWord === gameState.currentWord) {
-      newWord = WORD_LIST[Math.floor(Math.random() * WORD_LIST.length)];
-    }
-
-    const updatedPlayers = gameState.players.map(p => ({
-      ...p,
-      hasFinishedDrawing: false,
-      drawingOrder: 0,
-      drawingData: null
-    }));
-
-    syncState({
-      ...gameState,
-      currentWord: newWord,
-      players: updatedPlayers,
-      isBoardLocked: false,
-      revealOrder: 0
-    });
-  };
-
-  const finishDrawing = () => {
-    const myIdx = gameState.players.findIndex(p => p.id === userId);
-    if (myIdx === -1) return;
-
-    // Optimistically update local state for immediate UI feedback
-    const players = [...gameState.players];
-    players[myIdx].hasFinishedDrawing = true;
-    setGameState(prev => ({ ...prev, players }));
-
-    socket.emit('player-finish-drawing', {
-      roomId: gameState.roomId,
-      playerId: userId,
-      drawingData: currentDrawing
-    });
-  };
-
-  const handleGuess = (correct: boolean) => {
-    if (correct) {
-      // Points logic
-      // RevealOrder is the index (0, 1, 2...)
-      // points = 3 if revealedOrder = 0
-      // points = 2 if revealedOrder = 1
-      // points = 1 if revealedOrder >= 2
-      const points = Math.max(1, 3 - gameState.revealOrder);
-      const players = [...gameState.players];
-
-      // Give points to guesser
-      const gIdx = players.findIndex(p => p.id === gameState.guesserId);
-      if (gIdx !== -1) players[gIdx].score += points;
-
-      // Give points to the drawer currently revealed
-      const currentDrawer = players
-        .filter(p => !p.isGuesser)
-        .sort((a, b) => a.drawingOrder - b.drawingOrder)[gameState.revealOrder];
-
-      if (currentDrawer) {
-        const dIdx = players.findIndex(p => p.id === currentDrawer.id);
-        if (dIdx !== -1) players[dIdx].score += points;
-      }
-
-      syncState({
-        ...gameState,
-        players,
-        winnerId: gameState.guesserId,
-        phase: GamePhase.GUESSING, // Stay here to show the winner dialog
-        revealOrder: gameState.revealOrder // Keep index
-      });
-      // A small delay or wait for "Next Round" click is better
-    } else {
-      // Next reveal or Game Over
-      const drawersCount = gameState.players.filter(p => !p.isGuesser).length;
-      if (gameState.revealOrder < drawersCount - 1) {
-        syncState({
-          ...gameState,
-          revealOrder: gameState.revealOrder + 1
-        });
-      } else {
-        // All revealed, no one guessed
-        syncState({
-          ...gameState,
-          winnerId: 'NONE'
-        });
-      }
+  const skipRound = () => {
+    if (window.confirm('Skip this round? Drawings will be discarded and everyone returns to the lobby.')) {
+      sendAction({ type: 'SKIP_ROUND' });
     }
   };
 
-  const handleCloseGuessingboard = () => {
+  const forceFinish = (targetId: string) => sendAction({ type: 'FORCE_FINISH', targetId });
 
-  }
+  const handleGuess = (correct: boolean) => sendAction({ type: 'GUESS', correct });
 
   const nextRound = () => {
     startGame();
@@ -335,10 +248,12 @@ const App: React.FC = () => {
   const leaveRoom = () => {
     // Notify server we are leaving (so it marks us as disconnected but keeps score)
     if (gameState.roomId) {
-      socket.emit('leave-room', { roomId: gameState.roomId, playerId: userId });
+      socket.emit('leave-room');
     }
 
     // Reset local view only
+    gameStateRef.current = { ...gameStateRef.current, roomId: '' };
+    setGameState(prev => ({ ...prev, roomId: '' }));
     setRoomPath('');
     window.location.hash = '';
   };
@@ -448,6 +363,11 @@ const App: React.FC = () => {
 
   // Room View
   const me = gameState.players.find(p => p.id === userId);
+  const iAmDone = !!me?.hasFinishedDrawing || pressedRound === gameState.round;
+  const roundInProgress = gameState.phase === GamePhase.PICKING
+    || gameState.phase === GamePhase.DRAWING
+    || (gameState.phase === GamePhase.GUESSING && !gameState.winnerId);
+  const stillDrawing = gameState.players.filter(p => !p.isGuesser && !p.hasFinishedDrawing && p.isConnected);
   const totalStars = me?.score || 0;
 
   return (
@@ -478,6 +398,15 @@ const App: React.FC = () => {
             <Send size={16} className="text-blue-400" />
             Copy Link
           </button>
+          {me?.isHost && roundInProgress && (
+            <button
+              onClick={skipRound}
+              className="flex items-center gap-2 px-4 py-2 bg-yellow-900/20 hover:bg-yellow-900/40 text-yellow-400 rounded-lg text-sm font-bold border border-yellow-800/30 transition-all"
+            >
+              <SkipForward size={16} />
+              Skip Round
+            </button>
+          )}
           <button
             onClick={leaveRoom}
             className="flex items-center gap-2 px-4 py-2 bg-red-900/20 hover:bg-red-900/40 text-red-400 rounded-lg text-sm font-bold border border-red-800/30 transition-all"
@@ -506,6 +435,11 @@ const App: React.FC = () => {
                   <div className="w-24 h-24 bg-blue-600/10 rounded-full flex items-center justify-center mb-6 border-4 border-dashed border-blue-500/30">
                     <Users size={40} className="text-blue-500" />
                   </div>
+                  {gameState.notice && (
+                    <p className="mb-6 bg-yellow-500/10 text-yellow-400 px-6 py-3 rounded-full font-bold border border-yellow-500/30">
+                      {gameState.notice}
+                    </p>
+                  )}
                   <h2 className="text-2xl font-bold mb-2">Welcome to the Lobby</h2>
                   <p className="text-slate-400 mb-8 max-w-md">Wait for more players to join or start the round if you're the host.</p>
 
@@ -539,7 +473,7 @@ const App: React.FC = () => {
                         {gameState.selectableWords?.map((word, idx) => (
                           <button
                             key={word}
-                            onClick={() => selectWord(word)}
+                            onClick={() => selectWord(idx)}
                             className="w-32 h-44 bg-blue-600 hover:bg-blue-500 rounded-xl flex flex-col items-center justify-center gap-4 border-4 border-blue-400 transition-all hover:scale-105 shadow-2xl group"
                           >
                             <div className="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center font-black text-white text-xl">
@@ -595,28 +529,44 @@ const App: React.FC = () => {
                   </div>
 
                   <Canvas
-                    key={gameState.currentWord || 'lobby'}
+                    ref={canvasRef}
+                    key={gameState.round}
                     me={me}
-                    disabled={me?.isGuesser || me?.hasFinishedDrawing || gameState.isBoardLocked}
-                    onSave={setCurrentDrawing}
+                    disabled={me?.isGuesser || iAmDone || gameState.isBoardLocked}
                     isBoardLocked={gameState.isBoardLocked}
                   />
 
-                  {!me?.isGuesser && !me?.hasFinishedDrawing && (
+                  {!me?.isGuesser && !iAmDone && (
                     <div className="mt-4 flex justify-center">
                       <button
-                        onClick={finishDrawing}
+                        onPointerDown={finishDrawing}
+                        // Keyboard activation (Enter/Space) has no pointerdown
+                        onClick={(e) => { if (e.detail === 0) finishDrawing(e); }}
                         className="px-12 py-4 bg-green-600 hover:bg-green-500 text-white font-black text-xl rounded-2xl shadow-lg shadow-green-600/20 transition-all border-b-4 border-green-800 active:translate-y-1"
                       >
                         I'M DONE!
                       </button>
                     </div>
                   )}
-                  {me?.hasFinishedDrawing && !me.isGuesser && (
+                  {iAmDone && !me?.isGuesser && (
                     <div className="mt-4 text-center">
                       <p className="text-green-400 font-bold bg-green-400/10 px-6 py-3 rounded-full border border-green-500/30 inline-block">
                         Waiting for others to finish...
                       </p>
+                    </div>
+                  )}
+                  {me?.isHost && gameState.isBoardLocked && stillDrawing.length > 0 && (
+                    <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+                      <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">Host: still drawing</span>
+                      {stillDrawing.map(p => (
+                        <button
+                          key={p.id}
+                          onClick={() => forceFinish(p.id)}
+                          className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-200 text-xs font-bold rounded-lg border border-slate-600 transition-colors"
+                        >
+                          Force {p.name} done
+                        </button>
+                      ))}
                     </div>
                   )}
                 </div>
@@ -630,7 +580,6 @@ const App: React.FC = () => {
                       onClick={() => setShowGuessingBoard(true)}
                       className="px-8 py-3 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded-xl transition-all shadow-lg flex items-center gap-2 mx-auto"
                     >
-                      <HelpCircle size={20} />
                       OPEN GUESSING BOARD
                     </button>
                   </div>
@@ -658,11 +607,15 @@ const App: React.FC = () => {
                   currentRevealIndex={gameState.revealOrder}
                   isGuesser={userId === gameState.guesserId}
                   myId={userId}
+                  drawings={drawings.round === gameState.round ? drawings.urls : {}}
                   word={gameState.currentWord || ''}
                   onClose={() => setShowGuessingBoard(false)}
                   onCorrect={() => handleGuess(true)}
                   onIncorrect={() => handleGuess(false)}
                   isGameOver={!!gameState.winnerId}
+                  winnerId={gameState.winnerId}
+                  isHost={!!me?.isHost}
+                  onNextRound={nextRound}
                 />
               )}
             </div>

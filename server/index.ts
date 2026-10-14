@@ -1,10 +1,12 @@
 import express from 'express';
 import { createServer } from 'http';
-import { Server } from 'socket.io';
+import { Server, Socket } from 'socket.io';
 import cors from 'cors';
 import path from 'path';
+import { performance } from 'perf_hooks';
 import { fileURLToPath } from 'url';
-import { GameState, Player } from '../types.js'; // Note: .js extension for ESM compatibility with ts-node/tsx if needed, or just types if configured
+import type { GameState } from '../types.js'; // Note: .js extension for ESM compatibility with ts-node/tsx if needed, or just types if configured
+import { reduce, createInitialState, type GameAction, type ClientIntent, type ReduceResult } from '../game/reducer.js';
 
 const app = express();
 const __filename = fileURLToPath(import.meta.url);
@@ -17,8 +19,26 @@ app.use(cors({ origin: ALLOWED_ORIGIN }));
 const distPath = path.join(__dirname, '../dist');
 app.use(express.static(distPath));
 
+const MAX_DRAWING_BYTES = 512 * 1024;
+const ALLOWED_DRAWING_TYPES = new Set(['image/webp', 'image/png', 'image/jpeg']);
+
+// Latency compensation: estimate each socket's one-way latency from the lowest recent RTT
+// and subtract it from the arrival time of a "done" press. Caps limit how much a client
+// can gain by faking a slow connection or a large input delay.
+const PING_INTERVAL_MS = 2000;
+const RTT_SAMPLES = 8;
+const MAX_LATENCY_COMPENSATION_MS = 100;
+const MAX_INPUT_DELAY_COMPENSATION_MS = 50;
+
+// A dropped connection only counts as leaving after this long, so a brief network blip
+// (e.g. a phone switching Wi-Fi → 4G) doesn't skip the player's turn or move the host.
+const DISCONNECT_GRACE_MS = Number(process.env.DISCONNECT_GRACE_MS) || 8000;
+
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
+    // WebSocket only: skips the long-polling phase, which adds latency to early presses
+    transports: ['websocket'],
+    maxHttpBufferSize: MAX_DRAWING_BYTES + 64 * 1024,
     cors: {
         origin: ALLOWED_ORIGIN,
         methods: ['GET', 'POST'],
@@ -30,6 +50,41 @@ const PORT = process.env.PORT || 3001;
 // Store room states
 const rooms = new Map<string, GameState>();
 
+// Drawings are kept out of GameState so state broadcasts stay small; each image is relayed once as binary
+type Drawing = { image: Buffer; mime: string };
+const drawings = new Map<string, { round: number; byPlayer: Map<string, Drawing> }>();
+
+// Which room/player each socket belongs to. Actions are attributed using this,
+// never using ids sent by the client.
+const sessions = new Map<string, { roomId: string; playerId: string }>();
+
+const rttSamples = new Map<string, number[]>();
+
+const measureRtt = (socket: Socket) => {
+    const sentAt = performance.now();
+    socket.timeout(PING_INTERVAL_MS).emit('latency-ping', (err: Error | null) => {
+        if (err) return;
+        const samples = rttSamples.get(socket.id) ?? [];
+        samples.push(performance.now() - sentAt);
+        if (samples.length > RTT_SAMPLES) samples.shift();
+        rttSamples.set(socket.id, samples);
+    });
+};
+
+const estimatedOneWayMs = (socketId: string) => {
+    const samples = rttSamples.get(socketId);
+    if (!samples?.length) return 0;
+    return Math.min(Math.min(...samples) / 2, MAX_LATENCY_COMPENSATION_MS);
+};
+
+setInterval(() => {
+    // Only players in a room need a latency estimate
+    for (const socketId of sessions.keys()) {
+        const socket = io.sockets.sockets.get(socketId);
+        if (socket) measureRtt(socket);
+    }
+}, PING_INTERVAL_MS);
+
 // Helper to broadcast current state to everyone in a room
 const broadcastRoomState = (roomId: string) => {
     const state = rooms.get(roomId);
@@ -39,171 +94,198 @@ const broadcastRoomState = (roomId: string) => {
     broadcastRoomList();
 };
 
+const roomSummaries = () => Array.from(rooms.values()).map(r => ({
+    id: r.roomId,
+    playerCount: r.players.length,
+    phase: r.phase
+}));
+
+// Only emit to every socket when the list actually changed, not on every game action
+let lastRoomList = '';
 const broadcastRoomList = () => {
-    const roomList = Array.from(rooms.values()).map(r => ({
-        id: r.roomId,
-        playerCount: r.players.length,
-        phase: r.phase
-    }));
-    io.emit('room-list-update', roomList);
+    const list = roomSummaries();
+    const serialized = JSON.stringify(list);
+    if (serialized === lastRoomList) return;
+    lastRoomList = serialized;
+    io.emit('room-list-update', list);
+};
+
+// Single entry point for every state change: run the shared reducer, then broadcast
+// onAccepted runs before the new state is broadcast
+const dispatch = (roomId: string, action: GameAction, onAccepted?: (state: GameState) => void): ReduceResult => {
+    const state = rooms.get(roomId);
+    if (!state) return { ok: false, error: 'Room not found' };
+
+    const result = reduce(state, action);
+    if (!result.ok) return result;
+    onAccepted?.(result.state);
+
+    if (result.state.players.some(p => p.isConnected)) {
+        rooms.set(roomId, result.state);
+        const stored = drawings.get(roomId);
+        if (stored && stored.round !== result.state.round) drawings.delete(roomId);
+        broadcastRoomState(roomId);
+    } else {
+        // Everyone disconnected
+        rooms.delete(roomId);
+        drawings.delete(roomId);
+        broadcastRoomList();
+    }
+    return result;
+};
+
+const pendingDisconnects = new Map<string, NodeJS.Timeout>();
+const graceKey = (roomId: string, playerId: string) => `${roomId}:${playerId}`;
+
+const cancelPendingDisconnect = (roomId: string, playerId: string) => {
+    const key = graceKey(roomId, playerId);
+    clearTimeout(pendingDisconnects.get(key));
+    pendingDisconnects.delete(key);
+};
+
+// Explicit leave: takes effect immediately
+const leaveCurrentRoom = (socketId: string) => {
+    const session = sessions.get(socketId);
+    if (!session) return;
+    sessions.delete(socketId);
+    cancelPendingDisconnect(session.roomId, session.playerId);
+    dispatch(session.roomId, { type: 'DISCONNECT', playerId: session.playerId, socketId });
+};
+
+// Dropped connection: takes effect after the grace period unless the player rejoins first.
+// If they rejoin from a new socket, the reducer ignores this stale socketId anyway.
+const scheduleDisconnect = (socketId: string) => {
+    const session = sessions.get(socketId);
+    if (!session) return;
+    sessions.delete(socketId);
+    cancelPendingDisconnect(session.roomId, session.playerId);
+    const key = graceKey(session.roomId, session.playerId);
+    pendingDisconnects.set(key, setTimeout(() => {
+        pendingDisconnects.delete(key);
+        dispatch(session.roomId, { type: 'DISCONNECT', playerId: session.playerId, socketId });
+    }, DISCONNECT_GRACE_MS));
 };
 
 io.on('connection', (socket) => {
     // Send initial room list to new connection
-    const initialRooms = Array.from(rooms.values()).map(r => ({
-        id: r.roomId,
-        playerCount: r.players.length,
-        phase: r.phase
-    }));
-    socket.emit('room-list-update', initialRooms);
+    socket.emit('room-list-update', roomSummaries());
+
+    // A few quick samples so the first press of a fresh connection is already compensated
+    for (let i = 0; i < 3; i++) setTimeout(() => measureRtt(socket), i * 200);
 
     socket.on('join-room', ({ roomId, playerName, playerId }: { roomId: string, playerName: string, playerId: string }) => {
-        socket.join(roomId);
+        if (typeof roomId !== 'string' || !roomId || typeof playerId !== 'string' || typeof playerName !== 'string') {
+            socket.emit('action-error', { message: 'Invalid join request' });
+            return;
+        }
+
+        const previous = sessions.get(socket.id);
+        if (previous && previous.roomId !== roomId) {
+            socket.leave(previous.roomId);
+            leaveCurrentRoom(socket.id);
+        }
+
+        cancelPendingDisconnect(roomId, playerId);
 
         if (!rooms.has(roomId)) {
-            rooms.set(roomId, {
-                roomId,
-                phase: 'LOBBY' as any,
-                players: [],
-                currentWord: null,
-                guesserId: null,
-                winnerId: null,
-                revealOrder: 0,
-                selectableWords: null,
-                isBoardLocked: false
-            });
+            rooms.set(roomId, createInitialState(roomId));
         }
 
-        const state = rooms.get(roomId);
-        if (!state) return;
+        const result = dispatch(roomId, { type: 'JOIN', playerId, name: playerName, socketId: socket.id });
+        if (!result.ok) {
+            if (!rooms.get(roomId)?.players.length) rooms.delete(roomId);
+            socket.emit('action-error', { message: result.error });
+            return;
+        }
 
-        // Clean up invalid players
-        state.players = state.players.filter(p => p.id !== undefined);
+        socket.join(roomId);
+        sessions.set(socket.id, { roomId, playerId });
 
-        const existingPlayer = state.players.find(p => p.id === playerId);
-        if (existingPlayer) {
-            existingPlayer.socketId = socket.id;
-            existingPlayer.isConnected = true;
-            existingPlayer.name = playerName; // Update name in case it changed
+        // Late joiners / reconnects get the drawings submitted so far this round
+        const stored = drawings.get(roomId);
+        if (stored) {
+            for (const [drawerId, drawing] of stored.byPlayer) {
+                socket.emit('drawing', { round: stored.round, playerId: drawerId, ...drawing });
+            }
+        }
+    });
+
+    socket.on('game-action', (intent: ClientIntent) => {
+        // Read the clock before any other work so processing time doesn't count against the player
+        const arrivedAt = performance.now();
+
+        const session = sessions.get(socket.id);
+        if (!session || !intent || typeof intent.type !== 'string') {
+            socket.emit('action-error', { message: 'Not in a room' });
+            return;
+        }
+
+        let action: GameAction;
+        if (intent.type === 'FINISH_DRAWING') {
+            const inputDelay = Number(intent.inputDelayMs);
+            const inputCompensation = Number.isFinite(inputDelay)
+                ? Math.min(Math.max(inputDelay, 0), MAX_INPUT_DELAY_COMPENSATION_MS)
+                : 0;
+            const pressedAt = arrivedAt - estimatedOneWayMs(socket.id) - inputCompensation;
+            action = { type: 'FINISH_DRAWING', playerId: session.playerId, pressedAt };
+        } else if (intent.type === 'FORCE_FINISH') {
+            // Forced players rank by when the host acted — no compensation on their behalf
+            action = { type: 'FORCE_FINISH', playerId: session.playerId, targetId: String(intent.targetId), pressedAt: arrivedAt };
         } else {
-            state.players.push({
-                id: playerId,
-                name: playerName,
-                score: 0,
-                isHost: state.players.length === 0,
-                isGuesser: state.guesserId === playerId,
-                hasFinishedDrawing: false,
-                drawingOrder: 0,
-                drawingData: null,
-                socketId: socket.id,
-                isConnected: true
-            });
+            action = { ...intent, playerId: session.playerId } as GameAction;
         }
 
-        broadcastRoomState(roomId);
-    });
-
-    socket.on('drawing-data', ({ roomId, data }: { roomId: string, data: any }) => {
-        socket.to(roomId).emit('drawing-data', data);
-    });
-
-    socket.on('send-message', ({ roomId, message, playerName }: { roomId: string, message: string, playerName: string }) => {
-        io.in(roomId).emit('new-message', {
-            playerName,
-            message,
-            timestamp: new Date().toISOString(),
-        });
-    });
-
-    socket.on('player-finish-drawing', ({ roomId, playerId, drawingData }: { roomId: string, playerId: string, drawingData: any }) => {
-        const state = rooms.get(roomId);
-        if (!state) return;
-
-        const player = state.players.find(p => p.id === playerId);
-        if (player && !player.hasFinishedDrawing) {
-            const finishedCount = state.players.filter(p => p.hasFinishedDrawing).length;
-            
-            player.hasFinishedDrawing = true;
-            player.drawingOrder = finishedCount + 1;
-            player.drawingData = drawingData;
-
-            const totalDrawers = state.players.filter(p => !p.isGuesser && p.isConnected).length;
-            const everyoneDone = state.players.filter(p => p.hasFinishedDrawing).length >= totalDrawers;
-
-            if (everyoneDone) {
-                state.phase = 'GUESSING' as any;
+        // Ask a forced player's client to upload whatever is on their canvas. This must reach them
+        // before the state update: if they were the last drawer, the update ends DRAWING and unmounts the canvas.
+        const requestForcedDrawing = action.type === 'FORCE_FINISH'
+            ? (state: GameState) => {
+                const target = state.players.find(p => p.id === action.targetId);
+                if (target?.socketId) io.to(target.socketId).emit('request-drawing', { round: state.round });
             }
+            : undefined;
 
-            broadcastRoomState(roomId);
+        const result = dispatch(session.roomId, action, requestForcedDrawing);
+        if (!result.ok) {
+            socket.emit('action-error', { message: result.error });
         }
     });
 
-    socket.on('game-state-update', ({ roomId, state }: { roomId: string, state: GameState }) => {
-        rooms.set(roomId, state);
-        broadcastRoomState(roomId);
+    socket.on('submit-drawing', ({ round, image, mime }: { round: number, image: Buffer, mime: string }) => {
+        const session = sessions.get(socket.id);
+        const state = session && rooms.get(session.roomId);
+        if (!session || !state) return;
+
+        const player = state.players.find(p => p.id === session.playerId);
+        const valid = Buffer.isBuffer(image)
+            && image.length <= MAX_DRAWING_BYTES
+            && ALLOWED_DRAWING_TYPES.has(mime)
+            && round === state.round
+            && player?.hasFinishedDrawing;
+        if (!valid) {
+            socket.emit('action-error', { message: 'Drawing rejected' });
+            return;
+        }
+
+        let stored = drawings.get(session.roomId);
+        if (!stored || stored.round !== state.round) {
+            stored = { round: state.round, byPlayer: new Map() };
+            drawings.set(session.roomId, stored);
+        }
+        if (stored.byPlayer.has(session.playerId)) return;
+
+        stored.byPlayer.set(session.playerId, { image, mime });
+        io.to(session.roomId).emit('drawing', { round, playerId: session.playerId, image, mime });
     });
 
-    socket.on('disconnecting', () => {
-        for (const roomId of socket.rooms) {
-            if (roomId !== socket.id) {
-                const state = rooms.get(roomId);
-                if (state) {
-                    const player = state.players.find(p => p.socketId === socket.id);
-                    if (player) {
-                        player.isConnected = false;
-
-                        // If host disconnected, migrate host to someone who is connected
-                        if (player.isHost) {
-                            const nextHost = state.players.find(p => p.isConnected && p.id !== player.id);
-                            if (nextHost) {
-                                player.isHost = false;
-                                nextHost.isHost = true;
-                            }
-                        }
-
-                        broadcastRoomState(roomId);
-                    }
-
-                    // If room is empty (everyone disconnected), consider deleting it
-                    const anyConnected = state.players.some(p => p.isConnected);
-                    if (!anyConnected) {
-                        // Optional: Set a timeout to delete room after some time if no one reconnects
-                        rooms.delete(roomId);
-                    }
-                }
-            }
-        }
+    socket.on('leave-room', () => {
+        const session = sessions.get(socket.id);
+        if (session) socket.leave(session.roomId);
+        leaveCurrentRoom(socket.id);
     });
 
     socket.on('disconnect', () => {
-    });
-
-    socket.on('leave-room', ({ roomId, playerId }: { roomId: string, playerId: string }) => {
-        socket.leave(roomId);
-        const state = rooms.get(roomId);
-        if (state) {
-            const player = state.players.find(p => p.id === playerId);
-            if (player) {
-                player.isConnected = false;
-
-                // If host temporarily leaves, migrate host to someone who is connected
-                if (player.isHost) {
-                    const nextHost = state.players.find(p => p.isConnected && p.id !== player.id);
-                    if (nextHost) {
-                        player.isHost = false;
-                        nextHost.isHost = true;
-                    }
-                }
-
-                broadcastRoomState(roomId);
-            }
-
-            // If room is empty (everyone disconnected), consider deleting it
-            const anyConnected = state.players.some(p => p.isConnected);
-            if (!anyConnected) {
-                rooms.delete(roomId);
-            }
-        }
+        rttSamples.delete(socket.id);
+        scheduleDisconnect(socket.id);
     });
 });
 

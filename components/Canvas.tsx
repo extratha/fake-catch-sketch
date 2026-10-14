@@ -1,9 +1,13 @@
 
 import { Player } from '@/types';
-import React, { useRef, useEffect, useState, useCallback } from 'react';
+import React, { useRef, useEffect, useState, useCallback, forwardRef, useImperativeHandle } from 'react';
+
+export interface CanvasHandle {
+  // Encodes the current drawing. Called once when the player finishes, not after every stroke.
+  toBlob: () => Promise<Blob | null>;
+}
 
 interface CanvasProps {
-  onSave: (dataUrl: string) => void;
   me: Player;
   disabled: boolean;
   color?: string;
@@ -11,8 +15,17 @@ interface CanvasProps {
   isBoardLocked?: boolean;
 }
 
-const Canvas: React.FC<CanvasProps> = ({ onSave, me, disabled, color = "#f8fafc", lineWidth = 3, isBoardLocked = false }) => {
+const Canvas = forwardRef<CanvasHandle, CanvasProps>(({ me, disabled, color = "#f8fafc", lineWidth = 3, isBoardLocked = false }, ref) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useImperativeHandle(ref, () => ({
+    // WebP is several times smaller than PNG for line drawings; browsers without WebP encoding fall back to PNG
+    toBlob: () => new Promise(resolve => {
+      const canvas = canvasRef.current;
+      if (!canvas) return resolve(null);
+      canvas.toBlob(resolve, 'image/webp', 0.8);
+    })
+  }), []);
   const [isDrawing, setIsDrawing] = useState(false);
   const lastPos = useRef({ x: 0, y: 0 });
 
@@ -74,13 +87,7 @@ const Canvas: React.FC<CanvasProps> = ({ onSave, me, disabled, color = "#f8fafc"
   }, [isDrawing, disabled, color, lineWidth]);
 
   const stopDrawing = () => {
-    if (isDrawing) {
-      setIsDrawing(false);
-      const canvas = canvasRef.current;
-      if (canvas) {
-        onSave(canvas.toDataURL());
-      }
-    }
+    if (isDrawing) setIsDrawing(false);
   };
 
   const clearCanvas = () => {
@@ -90,7 +97,6 @@ const Canvas: React.FC<CanvasProps> = ({ onSave, me, disabled, color = "#f8fafc"
     if (!ctx) return;
     ctx.fillStyle = '#1e293b';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
-    onSave(canvas.toDataURL());
   };
 
   const pencilCursor = `url("data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjQiIGhlaWdodD0iMjQiIHZpZXdCb3g9IjAgMCAyNCAyNCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KICA8cGF0aCBkPSJNMTggMkwyMiA2TDcgMjFMMiAyMkwzIDE3TDE4IDJaIiBmaWxsPSIjRkFDQzE1IiBzdHJva2U9IiMxRTI5M0IiIHN0cm9rZS13aWR0aD0iMS41IiBzdHJva2UtbGluZWpvaW49InJvdW5kIi8+CiAgPHBhdGggZD0iTTE4IDJMMjIgNkwyMCA4TDE2IDRMMTggMloiIGZpbGw9IiNGREE0QUYiIHN0cm9rZT0iIzFFMjkzQiIgc3Ryb2tlLXdpZHRoPSIxLjUiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz4KICA8cGF0aCBkPSJNMiAyMkw1IDIxTDMgMTlMMiAyMloiIGZpbGw9IiM0NzU1NjkiLz4KPC9zdmc+") 2 22, crosshair`;
@@ -141,6 +147,6 @@ const Canvas: React.FC<CanvasProps> = ({ onSave, me, disabled, color = "#f8fafc"
       )}
     </div>
   );
-};
+});
 
 export default Canvas;

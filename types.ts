@@ -13,8 +13,8 @@ export interface Player {
   isHost: boolean;
   isGuesser: boolean;
   hasFinishedDrawing: boolean;
-  drawingOrder: number; // 0 means not finished
-  drawingData: string | null; // base64 image data
+  drawingOrder: number; // Rank among finishers by press time; 0 means not finished
+  finishedAt: number | null; // Server-clock press time after latency compensation
   socketId?: string; // Socket.io ID for disconnection tracking
   isConnected: boolean;
 }
@@ -29,6 +29,8 @@ export interface GameState {
   revealOrder: number; // Current index in the drawing sequence being guessed
   selectableWords: string[] | null;
   isBoardLocked: boolean;
+  round: number; // Increments whenever drawings are reset; drawings are sent separately and tagged with it
+  notice: string | null; // Why the last round was cancelled, shown in the lobby
 }
 
 export interface SocketEvent {

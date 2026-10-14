@@ -24,7 +24,13 @@ import {
   SkipForward,
 } from "lucide-react";
 
-// Vertical space taken by the page around the drawing board (header, stars, topic bar, done button)
+// Sizes the drawing board so that, once the page is scrolled down to the board, the topic bar,
+// the board and the I'M DONE button all fit on one desktop screen. When drawing starts the page
+// scrolls there automatically, so the header and score stars above are allowed to go off-screen.
+// Board height = 100vh − BOARD_CHROME_PX, so this is roughly the height of everything around the
+// canvas *within that scrolled view*: topic bar + gaps + done button + bottom padding (NOT the header).
+// Larger → smaller board with spare room; smaller → bigger board, but the I'M DONE button starts
+// falling below the screen. Check by starting a round on a short desktop window (e.g. 1280×720).
 const BOARD_CHROME_PX = 240;
 
 // Utils
@@ -32,13 +38,18 @@ const generateId = () => Math.random().toString(36).substring(2, 7);
 
 const App: React.FC = () => {
   // Persistence
-  const [userId] = useState(() => {
-    const saved = localStorage.getItem("sketch_userId");
+  // Proves who this player is and never leaves this browser except to the server, which derives
+  // the public player id from it — so seeing someone's id in the room doesn't let you act as them.
+  const [playerSecret] = useState(() => {
+    const saved = localStorage.getItem("sketch_secret");
     if (saved) return saved;
-    const fresh = generateId();
-    localStorage.setItem("sketch_userId", fresh);
+    const bytes = crypto.getRandomValues(new Uint8Array(32));
+    const fresh = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+    localStorage.setItem("sketch_secret", fresh);
     return fresh;
   });
+  // Public id assigned by the server on join; cached so a reload knows which player is "me" right away
+  const [userId, setUserId] = useState(() => localStorage.getItem("sketch_playerId") || "");
 
   const [userName, setUserName] = useState(
     () => localStorage.getItem("sketch_userName") || "",
@@ -74,6 +85,7 @@ const App: React.FC = () => {
   // Round in which this player pressed "done" — lets the UI react before the server confirms
   const [pressedRound, setPressedRound] = useState<number | null>(null);
   const canvasRef = useRef<CanvasHandle>(null);
+  const drawingSectionRef = useRef<HTMLDivElement>(null);
   const [randomWords, setRandomWords] = useState<string[]>([]);
   const [activeRooms, setActiveRooms] = useState<
     { id: string; playerCount: number; phase: string }[]
@@ -111,7 +123,7 @@ const App: React.FC = () => {
       setGameState((prev) => ({
         ...prev,
         roomId: rId,
-        players: prev.players.some((p) => p.id === userId)
+        players: !userId || prev.players.some((p) => p.id === userId)
           ? prev.players
           : [
               ...prev.players,
@@ -131,13 +143,17 @@ const App: React.FC = () => {
 
       setRoomPath(rId);
       window.location.hash = `#/rooms/${rId}`;
-      socket.emit("join-room", {
-        roomId: rId,
-        playerName: name,
-        playerId: userId,
-      });
+      socket.emit(
+        "join-room",
+        { roomId: rId, playerName: name, secret: playerSecret },
+        (response: { playerId?: string }) => {
+          if (!response?.playerId) return;
+          setUserId(response.playerId);
+          localStorage.setItem("sketch_playerId", response.playerId);
+        },
+      );
     },
-    [socket, userId],
+    [socket, userId, playerSecret],
   );
 
   const uploadDrawing = useCallback(
@@ -247,6 +263,15 @@ const App: React.FC = () => {
       window.removeEventListener("hashchange", handleHash);
     };
   }, [socket, userName, roomPath, joinRoom]);
+
+  // When drawing starts (or the word is rerolled), scroll so the board and the I'M DONE button sit
+  // at the bottom of the screen — every player starts the race ready to press, without scrolling.
+  // Instant rather than smooth: in a game decided by who finishes first, an animation is lost time.
+  useEffect(() => {
+    if (gameState.phase === GamePhase.DRAWING) {
+      drawingSectionRef.current?.scrollIntoView({ block: "end" });
+    }
+  }, [gameState.phase, gameState.round]);
 
   // Drop drawings from previous rounds
   useEffect(() => {
@@ -608,7 +633,7 @@ const App: React.FC = () => {
               )}
 
               {gameState.phase === GamePhase.DRAWING && (
-                <div className="p-4 bg-slate-900/50">
+                <div ref={drawingSectionRef} className="p-4 bg-slate-900/50">
                   <div className="mb-3 flex justify-between items-center bg-slate-800 px-4 py-3 rounded-xl border border-slate-700">
                     {me?.isGuesser ? (
                       <div className="text-center w-full py-4 space-y-4">
@@ -655,8 +680,8 @@ const App: React.FC = () => {
                     )}
                   </div>
 
-                  {/* Shrink the board on short screens so the I'M DONE button stays on screen without scrolling.
-                      BOARD_CHROME_PX is the height of everything above and below the canvas on desktop. */}
+                  {/* Board size is capped by screen height so it fits together with the I'M DONE button —
+                      see BOARD_CHROME_PX. Phones are limited by width instead and aren't affected. */}
                   <div
                     className="mx-auto w-full"
                     style={{

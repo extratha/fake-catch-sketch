@@ -4,6 +4,7 @@ import { Server, Socket } from 'socket.io';
 import cors from 'cors';
 import path from 'path';
 import { performance } from 'perf_hooks';
+import { createHash } from 'crypto';
 import { fileURLToPath } from 'url';
 import type { GameState } from '../types.js'; // Note: .js extension for ESM compatibility with ts-node/tsx if needed, or just types if configured
 import { reduce, createInitialState, type GameAction, type ClientIntent, type ReduceResult } from '../game/reducer.js';
@@ -134,6 +135,13 @@ const dispatch = (roomId: string, action: GameAction, onAccepted?: (state: GameS
     return result;
 };
 
+// Public player ids are derived from a secret that only the player's browser knows. Every player's
+// id is visible in the room state, so accepting ids from clients would let anyone join as someone
+// else (e.g. take over the host). A hash can't be reversed to get the secret back.
+const PLAYER_SECRET_PATTERN = /^[0-9a-f]{64}$/;
+const playerIdFromSecret = (secret: string) =>
+    createHash('sha256').update(secret).digest('base64url').slice(0, 16);
+
 const pendingDisconnects = new Map<string, NodeJS.Timeout>();
 const graceKey = (roomId: string, playerId: string) => `${roomId}:${playerId}`;
 
@@ -173,11 +181,20 @@ io.on('connection', (socket) => {
     // A few quick samples so the first press of a fresh connection is already compensated
     for (let i = 0; i < 3; i++) setTimeout(() => measureRtt(socket), i * 200);
 
-    socket.on('join-room', ({ roomId, playerName, playerId }: { roomId: string, playerName: string, playerId: string }) => {
-        if (typeof roomId !== 'string' || !roomId || typeof playerId !== 'string' || typeof playerName !== 'string') {
+    socket.on('join-room', (
+        { roomId, playerName, secret }: { roomId: string, playerName: string, secret: string },
+        ack?: (response: { playerId?: string, error?: string }) => void,
+    ) => {
+        const respond = (response: { playerId?: string, error?: string }) => {
+            if (typeof ack === 'function') ack(response);
+        };
+        if (typeof roomId !== 'string' || !roomId || typeof playerName !== 'string'
+            || typeof secret !== 'string' || !PLAYER_SECRET_PATTERN.test(secret)) {
             socket.emit('action-error', { message: 'Invalid join request' });
+            respond({ error: 'Invalid join request' });
             return;
         }
+        const playerId = playerIdFromSecret(secret);
 
         const previous = sessions.get(socket.id);
         if (previous && previous.roomId !== roomId) {
@@ -191,15 +208,19 @@ io.on('connection', (socket) => {
             rooms.set(roomId, createInitialState(roomId));
         }
 
+        // Join the socket.io room first so this player also receives the state broadcast from their own join
+        socket.join(roomId);
         const result = dispatch(roomId, { type: 'JOIN', playerId, name: playerName, socketId: socket.id });
         if (!result.ok) {
+            socket.leave(roomId);
             if (!rooms.get(roomId)?.players.length) rooms.delete(roomId);
             socket.emit('action-error', { message: result.error });
+            respond({ error: result.error });
             return;
         }
 
-        socket.join(roomId);
         sessions.set(socket.id, { roomId, playerId });
+        respond({ playerId });
 
         // Late joiners / reconnects get the drawings submitted so far this round
         const stored = drawings.get(roomId);
